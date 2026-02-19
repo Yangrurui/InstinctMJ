@@ -96,7 +96,7 @@ import torch
 
 from instinct_rl.runners import OnPolicyRunner
 
-import mjlab.utils.math as math_utils
+from mjlab.utils.lab_api import math as math_utils
 from mjlab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from mjlab.utils.dict import print_dict
 from mjlab.utils.io import load_pickle, load_yaml

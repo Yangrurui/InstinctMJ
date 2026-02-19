@@ -21,6 +21,7 @@ from mjlab.managers import SceneEntityCfg
 from mjlab.managers import TerminationTermCfg
 from mjlab.scene import SceneCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
+from mjlab.tasks.tracking import mdp as tracking_mdp
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg
 from mjlab.viewer import ViewerConfig
@@ -43,12 +44,14 @@ from instinct_mjlab.monitors import (
 from instinct_mjlab.motion_reference import MotionReferenceManagerCfg
 from instinct_mjlab.motion_reference.motion_files.amass_motion_cfg import AmassMotionCfg as AmassMotionCfgBase
 from instinct_mjlab.motion_reference.utils import motion_interpolate_bilinear
+from instinct_mjlab.utils.motion_validation import resolve_datasets_root
 
 combine_method = "prod"
 G1_CFG = G1_29DOF_TORSOBASE_POPSICLE_CFG
+_DATASETS_ROOT = resolve_datasets_root()
 
-_CONTACT_SENSOR_NAME = "contact_forces"
 _UNDESIRED_CONTACT_SENSOR_NAME = "undesired_contact_forces"
+_SELF_COLLISION_SENSOR_NAME = "self_collision"
 
 # MOTION_NAME = "AccadRun" # success
 # _hacked_selected_file_ = "ACCAD/Male2Running_c3d/C5 - walk to run_retargetted.npz"
@@ -72,7 +75,7 @@ _hacked_selected_files_ = ["fightAndSports1_subject1_retargetted.npz"]
 # _hacked_selected_files_ = ["CMU/90/90_26_retargetted.npz"]
 
 MOTION_NAME = "LafanFight5Files"
-_path_ = os.path.expanduser("~/Datasets/UbisoftLAFAN1_GMR_g1_29dof_torsoBase_retargetted_instinctnpz")
+_path_ = str(_DATASETS_ROOT / "lafan1_gmr_unitree_g1_instinct")
 _hacked_selected_files_ = [
     "fight1_subject2_retargetted.npz",
     "fight1_subject3_retargetted.npz",
@@ -83,7 +86,7 @@ _hacked_selected_files_ = [
 
 
 MOTION_NAME = "LafanFiltered"
-_path_ = os.path.expanduser("~/Datasets/UbisoftLAFAN1_GMR_g1_29dof_torsoBase_retargetted_instinctnpz")
+_path_ = str(_DATASETS_ROOT / "lafan1_gmr_unitree_g1_instinct")
 _hacked_selected_files_ = [
     "aiming1_subject1_retargetted.npz",  # O
     "aiming1_subject4_retargetted.npz",  # O
@@ -186,7 +189,7 @@ def _make_amass_motion_cfg() -> AmassMotionCfgBase:
         # path = os.path.expanduser("~/Datasets/UbisoftLAFAN1_GMR_g1_29dof_torsoBase_retargetted_instinctnpz")
         # path = os.path.expanduser("~/Datasets/AMASS_SMPLX-NG_GMR_29dof_g1_torsoBase_retargetted_20250901_instinctnpz")
         # path = _path_
-        path="/home/duanxin/Xyk/Datasets/20251116_50cm_kneeClimbStep1/20251106_diveroll4_simpleLab",
+        path=_path_,
         retargetting_func=None,
         filtered_motion_selection_filepath=None,
         motion_start_from_middle_range=[0.0, 0.8],
@@ -220,9 +223,9 @@ _G1_URDF_PATH = os.path.join(
 
 def _make_motion_reference_cfg(*, debug_vis: bool) -> MotionReferenceManagerCfg:
     return MotionReferenceManagerCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/torso_link",
+        entity_name="robot",
         robot_model_path=_G1_URDF_PATH,
-        reference_prim_path="/World/envs/env_.*/RobotReference/torso_link",
+        reference_entity_name="robot_reference" if debug_vis else None,
         link_of_interests=[
             "pelvis",
             "torso_link",
@@ -293,20 +296,10 @@ def _make_motion_reference_cfg(*, debug_vis: bool) -> MotionReferenceManagerCfg:
             MOTION_NAME: _make_amass_motion_cfg(),
         },
         mp_split_method="Even",
-        debug_vis=debug_vis,
     )
 
 
 def _make_scene_cfg(*, play: bool, motion_reference_cfg: MotionReferenceManagerCfg) -> SceneCfg:
-    contact_forces = ContactSensorCfg(
-        name=_CONTACT_SENSOR_NAME,
-        primary=ContactMatch(mode="body", pattern=".*", entity="robot"),
-        secondary=ContactMatch(mode="body", pattern="terrain"),
-        fields=("found", "force"),
-        reduce="maxforce",
-        history_length=3,
-        track_air_time=True,
-    )
     undesired_contact_forces = ContactSensorCfg(
         name=_UNDESIRED_CONTACT_SENSOR_NAME,
         primary=ContactMatch(
@@ -325,11 +318,19 @@ def _make_scene_cfg(*, play: bool, motion_reference_cfg: MotionReferenceManagerC
         reduce="netforce",
         num_slots=1,
     )
+    self_collision = ContactSensorCfg(
+        name=_SELF_COLLISION_SENSOR_NAME,
+        primary=ContactMatch(mode="subtree", pattern="torso_link", entity="robot"),
+        secondary=ContactMatch(mode="subtree", pattern="torso_link", entity="robot"),
+        fields=("found",),
+        reduce="none",
+        num_slots=1,
+    )
 
     entities = {
         "robot": deepcopy(G1_CFG),
     }
-    if play and motion_reference_cfg.debug_vis:
+    if play and motion_reference_cfg.reference_entity_name is not None:
         entities["robot_reference"] = deepcopy(G1_CFG)
 
     return SceneCfg(
@@ -338,8 +339,8 @@ def _make_scene_cfg(*, play: bool, motion_reference_cfg: MotionReferenceManagerC
         terrain=TerrainImporterCfg(terrain_type="plane"),
         entities=entities,
         sensors=(
-            contact_forces,
             undesired_contact_forces,
+            self_collision,
             motion_reference_cfg,
         ),
     )
@@ -537,6 +538,11 @@ def _rewards_cfg() -> dict[str, RewardTermCfg | None]:
             func=mdp.joint_pos_limits,
             weight=-10.0,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
+        ),
+        "self_collisions": RewardTermCfg(
+            func=tracking_mdp.self_collision_cost,
+            weight=-10.0,
+            params={"sensor_name": _SELF_COLLISION_SENSOR_NAME},
         ),
         "undesired_contacts": RewardTermCfg(
             func=instinct_mdp.undesired_contacts,
@@ -991,8 +997,8 @@ def g1_plane_shadowing_env_cfg(*, play: bool = False) -> ManagerBasedRlEnvCfg:
         decimation=4,
         episode_length_s=10.0,
     )
-    cfg.sim.njmax = 250
-    cfg.sim.nconmax = 100
+    cfg.sim.njmax = 300
+    cfg.sim.nconmax = None
     cfg.sim.mujoco.timestep = 1.0 / 50.0 / cfg.decimation
 
     _apply_motion_buffer_curriculum(cfg, motion_reference_cfg)

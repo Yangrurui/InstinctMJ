@@ -18,11 +18,16 @@ dependencies = [
 ]
 
 [project.scripts]
-instinct-train = "instinct_mjlab.scripts.train:main"
-instinct-play = "instinct_mjlab.scripts.play:main"
+instinct-train = "instinct_mjlab.scripts.instinct_rl.train:main"
+instinct-play = "instinct_mjlab.scripts.instinct_rl.play:main"
 instinct-list-envs = "instinct_mjlab.scripts.list_envs:main"
 instinct-depth-probe = "instinct_mjlab.scripts.depth_probe:main"
 instinct-perceptive-p0-1-7 = "instinct_mjlab.scripts.perceptive_p0_1_7:main"
+instinct-amass-filter = "instinct_mjlab.scripts.amass_filter:entry_point"
+instinct-amass-visualize = "instinct_mjlab.scripts.amass_visualize:main"
+instinct-gmr-to-instinct = "instinct_mjlab.scripts.GMR_to_instinct:main"
+instinct-motion-metadata = "instinct_mjlab.scripts.motion_matched_metadata_generator:entry_point"
+instinct-phalp-to-amass = "instinct_mjlab.scripts.phalp_to_amass:entry_point"
 
 [project.entry-points."mjlab.tasks"]
 instinct_mjlab = "instinct_mjlab.tasks"

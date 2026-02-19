@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import mjlab.envs.mdp as envs_mdp
 from mjlab.managers import SceneEntityCfg
-from mjlab.utils.lab_api.math import quat_apply_inverse, sample_uniform
+from mjlab.utils.lab_api.math import sample_uniform
 
 if TYPE_CHECKING:
   from mjlab.entity import Entity
@@ -48,7 +48,10 @@ def push_by_setting_velocity_without_stand(
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
   velocity_threshold: float = 0.15,
 ) -> None:
-  """Push the asset by setting root velocity. No push when standing still."""
+  """Push the asset by setting root velocity. No push when standing still.
+
+  Mirrors the original InstinctLab ``push_by_setting_velocity_without_stand``.
+  """
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
   if env_ids.numel() == 0:
@@ -61,16 +64,9 @@ def push_by_setting_velocity_without_stand(
   ranges = torch.tensor(range_list, device=env.device)
   add_vel = sample_uniform(ranges[:, 0], ranges[:, 1], vel_w.shape, device=env.device)
 
-  command_term = env.command_manager.get_term(command_name)
-  if hasattr(command_term, "anchor_quat_w") and hasattr(command_term, "anchor_lin_vel_w"):
-    ref_lin_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.anchor_lin_vel_w)
-    ref_ang_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.anchor_ang_vel_w)
-    lin_vel = torch.norm(ref_lin_vel_b[env_ids, :2], dim=1) > velocity_threshold
-    ang_vel = torch.abs(ref_ang_vel_b[env_ids, 2]) > velocity_threshold
-  else:
-    cmd = env.command_manager.get_command(command_name)[env_ids]
-    lin_vel = torch.norm(cmd[:, :2], dim=1) > velocity_threshold
-    ang_vel = torch.abs(cmd[:, 2]) > velocity_threshold
+  cmd = env.command_manager.get_command(command_name)[env_ids]
+  lin_vel = torch.norm(cmd[:, :2], dim=1) > velocity_threshold
+  ang_vel = torch.abs(cmd[:, 2]) > velocity_threshold
 
   should_push = torch.logical_or(lin_vel, ang_vel).float().unsqueeze(-1)
   vel_w += add_vel * should_push

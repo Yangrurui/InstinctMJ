@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 
 import yaml
@@ -14,12 +15,13 @@ from mjlab.managers import RewardTermCfg
 from mjlab.managers import SceneEntityCfg
 from mjlab.managers import TerminationTermCfg
 from mjlab.scene import SceneCfg
-from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg
+from mjlab.utils.spec_config import CollisionCfg
 from mjlab.viewer import ViewerConfig
 
 import instinct_mjlab.envs.mdp as instinct_mdp
+import instinct_mjlab.tasks.shadowing.beyondmimic.beyondmimic_env_cfg as beyondmimic_cfg
 from instinct_mjlab.assets.unitree_g1 import (
     G1_29DOF_TORSOBASE_POPSICLE_CFG,
     G1_MJCF_PATH,
@@ -41,17 +43,18 @@ from instinct_mjlab.monitors import (
 from instinct_mjlab.motion_reference import MotionReferenceManagerCfg
 from instinct_mjlab.motion_reference.motion_files.amass_motion_cfg import AmassMotionCfg as AmassMotionCfgBase
 from instinct_mjlab.motion_reference.utils import motion_interpolate_bilinear
-from instinct_mjlab.utils.datasets import resolve_datasets_root
+from instinct_mjlab.utils.motion_validation import resolve_datasets_root
 
 G1_CFG = G1_29DOF_TORSOBASE_POPSICLE_CFG
 _DATASETS_ROOT = resolve_datasets_root()
-_CONTACT_SENSOR_NAME = "contact_forces"
+_UNDESIRED_CONTACT_SENSOR_NAME = "undesired_contact_forces"
+_MOTION_DATASET_DIR = _DATASETS_ROOT / "lafan1_gmr_unitree_g1_instinct"
 
 # Motion configuration
 MOTION_NAME = "LafanKungfu1"
 _hacked_selected_file_ = "fightAndSports1_subject1_retargetted.npz"
-MOTION_NAME = "LafanSprint1"
-_hacked_selected_file_ = "sprint1_subject2_retargetted.npz"
+MOTION_NAME = "LafanWalk1"
+_hacked_selected_file_ = "walk1_subject1_retargeted.npz"
 
 with open(f"/tmp/{MOTION_NAME}.yaml", "w") as f:
     yaml.dump(
@@ -68,7 +71,7 @@ def _make_amass_motion_cfg() -> AmassMotionCfgBase:
     """AMASS motion configuration for BeyondMimic."""
 
     return AmassMotionCfgBase(
-        path=str(_DATASETS_ROOT / "UbisoftLAFAN1_GMR_g1_29dof_torsoBase_retargetted_instinctnpz"),
+        path=str(_MOTION_DATASET_DIR),
         retargetting_func=None,
         filtered_motion_selection_filepath=f"/tmp/{MOTION_NAME}.yaml",
         motion_start_from_middle_range=[0.0, 0.8],
@@ -83,9 +86,9 @@ def _make_amass_motion_cfg() -> AmassMotionCfgBase:
 
 def _make_motion_reference_cfg(*, debug_vis: bool) -> MotionReferenceManagerCfg:
     return MotionReferenceManagerCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/torso_link",
+        entity_name="robot",
         robot_model_path=G1_MJCF_PATH,
-        reference_prim_path="/World/envs/env_.*/RobotReference/torso_link",
+        reference_entity_name="robot_reference" if debug_vis else None,
         link_of_interests=[
             "pelvis",
             "torso_link",
@@ -114,36 +117,28 @@ def _make_motion_reference_cfg(*, debug_vis: bool) -> MotionReferenceManagerCfg:
             MOTION_NAME: _make_amass_motion_cfg(),
         },
         mp_split_method="Even",
-        debug_vis=debug_vis,
     )
 
 
 def _make_scene_cfg(*, play: bool, motion_reference_cfg: MotionReferenceManagerCfg) -> SceneCfg:
-    contact_forces = ContactSensorCfg(
-        name=_CONTACT_SENSOR_NAME,
-        primary=ContactMatch(mode="body", pattern=".*", entity="robot"),
-        secondary=ContactMatch(mode="body", pattern="terrain"),
-        fields=("found", "force"),
-        reduce="maxforce",
-        history_length=3,
-        track_air_time=True,
-    )
+    robot_reference = deepcopy(G1_CFG) if play and motion_reference_cfg.reference_entity_name is not None else None
+    if robot_reference is not None:
+        # Keep reference robot visible but remove all physical contacts to avoid launch/jitter artifacts.
+        robot_reference.collisions = (
+            CollisionCfg(
+                geom_names_expr=(".*",),
+                contype=0,
+                conaffinity=0,
+            ),
+        )
 
-    entities = {
-        "robot": deepcopy(G1_CFG),
-    }
-    if play and motion_reference_cfg.debug_vis:
-        entities["robot_reference"] = deepcopy(G1_CFG)
-
-    return SceneCfg(
+    return beyondmimic_cfg.BeyondMimicSceneCfg(
         num_envs=1 if play else 4096,
         env_spacing=2.5 if play else 4.0,
         terrain=TerrainImporterCfg(terrain_type="plane"),
-        entities=entities,
-        sensors=(
-            contact_forces,
-            motion_reference_cfg,
-        ),
+        robot=deepcopy(G1_CFG),
+        robot_reference=robot_reference,
+        motion_reference=motion_reference_cfg,
     )
 
 
@@ -274,20 +269,19 @@ def _observations_cfg(link_of_interests: list[str]) -> dict[str, ObservationGrou
 
 def _rewards_cfg() -> dict[str, RewardTermCfg | None]:
     return {
-        "motion_global_root_pos": RewardTermCfg(
-            func=instinct_mdp.base_position_tracking_gauss,
+        "base_position_imitation_gauss": RewardTermCfg(
+            func=instinct_mdp.base_position_imitation_gauss,
             weight=0.5,
             params={
-                "tracking_sigma": 0.3,
-                "tracking_torlerance": 0.0,
+                "std": 0.3,
             },
         ),
-        "motion_global_root_ori": RewardTermCfg(
-            func=instinct_mdp.base_rot_tracking_gauss,
+        "base_rot_imitation_gauss": RewardTermCfg(
+            func=instinct_mdp.base_rot_imitation_gauss,
             weight=0.5,
             params={
-                "tracking_sigma": 0.4,
-                "tracking_torlerance": 0.0,
+                "std": 0.4,
+                "difference_type": "axis_angle",
             },
         ),
         "motion_body_pos": RewardTermCfg(
@@ -336,12 +330,7 @@ def _rewards_cfg() -> dict[str, RewardTermCfg | None]:
             func=instinct_mdp.undesired_contacts,
             weight=-0.1,
             params={
-                "sensor_cfg": SceneEntityCfg(
-                    _CONTACT_SENSOR_NAME,
-                    body_names=[
-                        r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_yaw_link$)(?!right_wrist_yaw_link$).+$"
-                    ],
-                ),
+                "sensor_name": _UNDESIRED_CONTACT_SENSOR_NAME,
                 "threshold": 1.0,
             },
         ),
@@ -703,7 +692,18 @@ def g1_beyondmimic_plane_env_cfg(*, play: bool = False) -> ManagerBasedRlEnvCfg:
         episode_length_s=10.0,
     )
 
+    cfg.sim.nconmax = 100  # Higher than tracking due to many monitored body-ground contacts
+    cfg.sim.njmax = 350  # Increased to meet constraint requirements
+    if play:
+        # Play can hit higher instantaneous contacts depending on sampled pose / motion frame.
+        # Use MJWarp heuristics instead of fixed small caps to avoid nconmax/njmax overflows.
+        cfg.sim.nconmax = None
+        cfg.sim.njmax = None
     cfg.sim.mujoco.timestep = 1.0 / 50.0 / cfg.decimation
+    cfg.sim.mujoco.iterations = 10
+    cfg.sim.mujoco.ls_iterations = 20
+    # Keep CCD iterations moderate to avoid large EPA buffers at 4096 envs.
+    cfg.sim.mujoco.ccd_iterations = 80
 
     assert (
         len(list(motion_reference_cfg.motion_buffers.keys())) == 1

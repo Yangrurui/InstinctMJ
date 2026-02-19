@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import cv2
 from sklearn.cluster import DBSCAN
 
-import mjlab.utils.math as math_utils
+from mjlab.utils.lab_api import math as math_utils
 from mjlab.markers import VisualizationMarkers
 from mjlab.sensors import patterns
 from mjlab.utils.warp import convert_to_warp_mesh, raycast_mesh

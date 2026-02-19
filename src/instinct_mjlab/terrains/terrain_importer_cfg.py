@@ -19,10 +19,10 @@ class TerrainImporterCfg(TerrainImporterCfgBase):
     virtual_obstacles: dict[str, VirtualObstacleCfg] = field(default_factory=dict)
     """The virtual obstacles to use for the terrain importer."""
 
-    terrain_type: Literal["generator", "plane", "usd", "hacked_generator"] = "generator"
+    terrain_type: Literal["generator", "plane", "hacked_generator"] = "generator"
     """The type of terrain to generate. Defaults to "generator".
 
-    Available options are "plane", "usd", and "generator".
+    Available options are "plane" and "generator".
 
     ## NOTE
     The TerrainImporter of this package has some dedicated hack to fit the self-defined tasks.

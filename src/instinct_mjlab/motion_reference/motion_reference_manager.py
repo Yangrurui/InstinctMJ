@@ -7,10 +7,10 @@ from copy import copy
 from prettytable import PrettyTable
 from typing import TYPE_CHECKING
 
-import mjlab.utils.math as math_utils
+from mjlab.utils.lab_api import math as math_utils
 import mjlab.utils.lab_api.string as string_utils
 from mjlab.markers import VisualizationMarkers
-from mjlab.scene import Scene as InteractiveScene
+from mjlab.scene import Scene
 from mjlab.sensors import SensorBase
 from instinct_mjlab.utils.timestamped_buffer import TimestampedBuffer
 
@@ -53,7 +53,7 @@ class MotionReferenceManager(SensorBase):
         super().__init__()
         self.cfg: MotionReferenceManagerCfg = cfg
         self._is_initialized: bool = False
-        self._scene: InteractiveScene | None = None
+        self._scene: Scene | None = None
 
     def __str__(self):
         """Get the tabular information of the motion reference managed buffer."""
@@ -98,6 +98,14 @@ class MotionReferenceManager(SensorBase):
         self._initialize_impl()
         self._is_initialized = True
 
+    def update(self, dt: float) -> None:
+        """Advance motion-reference clock and update stale env buffers."""
+        super().update(dt)
+        if not self._is_initialized or not hasattr(self, "_timestamp"):
+            return
+        self._timestamp += dt
+        self._update_outdated_buffers()
+
     def _compute_data(self) -> MotionReferenceData:
         """Return the motion reference data (mjlab Sensor cache interface)."""
         self._update_outdated_buffers()
@@ -107,15 +115,33 @@ class MotionReferenceManager(SensorBase):
     def is_initialized(self) -> bool:
         return self._is_initialized
 
-    def set_scene(self, scene: InteractiveScene) -> None:
-        """Store the scene reference so _initialize_data can look up entities."""
-        self._scene = scene
-
     def _update_outdated_buffers(self) -> None:
         """Check and update buffers for environments whose data is outdated."""
         if not self._is_initialized or not hasattr(self, "_timestamp"):
             return
-        self._update_buffers_impl(self._ALL_INDICES)
+
+        # 1) Always refresh envs that have not produced data after init/reset.
+        outdated_mask = torch.logical_not(self._has_valid_data)
+
+        # 2) Refresh envs that reached their per-env update period.
+        elapsed = self._timestamp - self._timestamp_last_update
+        if isinstance(self.cfg.update_period, torch.Tensor):
+            update_period = self.cfg.update_period.to(device=self.device)
+            outdated_mask = torch.logical_or(outdated_mask, elapsed >= (update_period - 1e-6))
+        else:
+            update_period = float(self.cfg.update_period)
+            if update_period <= 0.0:
+                outdated_mask = torch.logical_or(outdated_mask, self._timestamp > self._timestamp_last_update)
+            else:
+                outdated_mask = torch.logical_or(outdated_mask, elapsed >= (update_period - 1e-6))
+
+        if not outdated_mask.any():
+            return
+
+        env_ids = self._ALL_INDICES[outdated_mask]
+        self._update_buffers_impl(env_ids)
+        self._timestamp_last_update[env_ids] = self._timestamp[env_ids]
+        self._has_valid_data[env_ids] = True
 
     """
     Properties
@@ -375,11 +401,18 @@ class MotionReferenceManager(SensorBase):
         super().reset(env_ids)
         if env_ids is None:
             env_ids = self.ALL_INDICES
+        env_ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
 
         # Reset motion buffer selection and resample selection
         self._reset_motion_buffers(env_ids)
         self._resample_buffer_collate_params(env_ids)
         self._resample_update_period(env_ids)
+
+        # Reset per-env timeline state. The next data query/update will refill references at t=0.
+        self._timestamp[env_ids] = 0.0
+        self._timestamp_last_update[env_ids] = 0.0
+        self._has_valid_data[env_ids] = False
+        self._reference_frame_timestamp[env_ids] = 0.0
 
     def find_joints(
         self, name_keys: str | Sequence[str], joint_subset: list[str] | None = None, preserve_order: bool = False
@@ -530,7 +563,7 @@ class MotionReferenceManager(SensorBase):
     ('reset' mode or 'startup' mode).
     """
 
-    def match_scene(self, scene: InteractiveScene):
+    def match_scene(self, scene: Scene):
         """Match the motion reference with the scene, including objects and terrain. Considering some of the motion
         reference need to utilize un-flatten terrain, this information must be provided to the motion reference buffer
         and motion reference manager.
@@ -587,52 +620,34 @@ class MotionReferenceManager(SensorBase):
         # set invalid timestamp data to invalid value.
         self._data.time_to_target_frame[self._data.validity == 0] = -1.0
 
+        # Keep the optional robot reference entity synchronized on regular buffer updates.
+        # This avoids a one-frame default spawn at world origin before visual callbacks run.
+        if self.cfg.reference_entity_name is not None:
+            if not hasattr(self, "_reference_entity"):
+                self._find_reference_view()
+            if hasattr(self, "_reference_entity"):
+                self._set_reference_view_state()
+
     """
     Manager's internal operations.
     """
 
-    @staticmethod
-    def _normalize_entity_token(token: str) -> str:
-        return "".join(char for char in token.lower() if char.isalnum())
-
-    def _resolve_entity_from_prim_path(self, prim_path: str):
+    def _resolve_entity(self, entity_name: str):
         if not hasattr(self, "_entities") or not self._entities:
             raise RuntimeError(
                 "Motion reference entity lookup requires entities from edit_spec(), "
                 "but no entities were provided."
             )
-
-        normalized_segments = []
-        for segment in prim_path.split("/"):
-            normalized_segment = self._normalize_entity_token(segment)
-            if normalized_segment:
-                normalized_segments.append(normalized_segment)
-
-        if not normalized_segments:
+        if entity_name not in self._entities:
             raise RuntimeError(
-                f"Could not resolve entity for prim_path '{prim_path}': no valid path segments after normalization. "
+                f"Could not find entity '{entity_name}' in scene entities. "
                 f"Available entities: {list(self._entities.keys())}"
             )
-
-        matched_entities = []
-        for entity_name, entity in self._entities.items():
-            normalized_entity_name = self._normalize_entity_token(entity_name)
-            if normalized_entity_name in normalized_segments:
-                matched_entities.append((entity_name, entity))
-
-        if len(matched_entities) != 1:
-            matched_entity_names = [name for name, _ in matched_entities]
-            raise RuntimeError(
-                f"Could not resolve entity for prim_path '{prim_path}'. "
-                f"Expected exactly one match, got {len(matched_entities)}: {matched_entity_names}. "
-                f"Available entities: {list(self._entities.keys())}"
-            )
-
-        return matched_entities[0][1]
+        return self._entities[entity_name]
 
     def _initialize_data(self):
         """Initialize _data for the 'sensor' output"""
-        self._entity = self._resolve_entity_from_prim_path(self.cfg.prim_path)
+        self._entity = self._resolve_entity(self.cfg.entity_name)
         self._num_envs = self._entity.data.default_root_state.shape[0]
         self._num_joints = self._entity.num_joints
         self._ALL_INDICES = torch.arange(self._num_envs, device=self.device)
@@ -656,9 +671,10 @@ class MotionReferenceManager(SensorBase):
         # Add an additional timestamp to the reference frame data, which is used for lazy update of the reference frame.
         self._reference_frame_timestamp = torch.zeros(self._num_envs, device=self.device)
 
-        # Timestamp tracking (provided by Isaac Lab SensorBase; must be initialized here for mjlab).
+        # Timestamp tracking.
         self._timestamp = torch.zeros(self._num_envs, device=self.device)
         self._timestamp_last_update = torch.zeros(self._num_envs, device=self.device)
+        self._has_valid_data = torch.zeros(self._num_envs, dtype=torch.bool, device=self.device)
 
         self._init_reference_state = MotionReferenceState.make_empty(
             self._num_envs,
@@ -720,6 +736,24 @@ class MotionReferenceManager(SensorBase):
                         joint_type = child.attrib.get("type", "hinge").lower()
                         if joint_type in ("free", "ball"):
                             parent.remove(child)
+
+            # Zero out the root body's position offset so that PK FK output is in the
+            # base-body frame (consistent with URDF behavior).  Without this, MJCF
+            # root bodies like `<body name="pelvis" pos="0 0 0.793">` cause PK to
+            # include the height offset in all FK positions, leading to a systematic
+            # mismatch against MuJoCo's actual body positions.
+            worldbody = mjcf_root.find("worldbody")
+            if worldbody is not None:
+                root_body = worldbody.find("body")
+                if root_body is not None:
+                    root_body.set("pos", "0 0 0")
+                    if "quat" in root_body.attrib:
+                        root_body.set("quat", "1 0 0 0")
+                    if "euler" in root_body.attrib:
+                        root_body.set("euler", "0 0 0")
+                    if "axisangle" in root_body.attrib:
+                        root_body.set("axisangle", "0 0 1 0")
+
             model_content = ET.tostring(mjcf_root, encoding="unicode")
 
             # MJCF files may reference meshes with relative paths (e.g. "assets/pelvis.STL").
@@ -1025,22 +1059,25 @@ class MotionReferenceManager(SensorBase):
     """
 
     def _find_reference_view(self):
-        """Find the ArticulationView to serve as a motion reference visualization."""
-        if self.cfg.reference_prim_path is None:
+        """Find the entity to serve as a motion reference visualization."""
+        if self.cfg.reference_entity_name is None:
             return
-        self._reference_entity = self._resolve_entity_from_prim_path(self.cfg.reference_prim_path)
+        self._reference_entity = self._resolve_entity(self.cfg.reference_entity_name)
 
     def _set_reference_view_state(self):
         """Set the articulation view to the reference state for motion visualization."""
+        # NOTE: Use self._data directly instead of self.data property to avoid
+        # infinite recursion: data property -> _update_outdated_buffers ->
+        # _update_buffers_impl -> _set_reference_view_state -> self.data -> ...
         if self.cfg.visualizing_robot_from == "aiming_frame":
             aiming_frame_idx = self.aiming_frame_idx
-            robot_pos_w = self.data.base_pos_w[self.ALL_INDICES, aiming_frame_idx].clone()
-            robot_quat_w = self.data.base_quat_w[self.ALL_INDICES, aiming_frame_idx]
-            robot_joint_pos = self.data.joint_pos[self.ALL_INDICES, aiming_frame_idx]
+            robot_pos_w = self._data.base_pos_w[self.ALL_INDICES, aiming_frame_idx].clone()
+            robot_quat_w = self._data.base_quat_w[self.ALL_INDICES, aiming_frame_idx]
+            robot_joint_pos = self._data.joint_pos[self.ALL_INDICES, aiming_frame_idx]
         elif self.cfg.visualizing_robot_from == "reference_frame":
             robot_pos_w = self.reference_frame.base_pos_w[self.ALL_INDICES, 0].clone()
             robot_quat_w = self.reference_frame.base_quat_w[self.ALL_INDICES, 0]
-            robot_joint_pos = self.data.joint_pos[self.ALL_INDICES, 0]
+            robot_joint_pos = self._data.joint_pos[self.ALL_INDICES, 0]
         else:
             raise ValueError(f"Unsupported cfg.visualizing_robot_from: {self.cfg.visualizing_robot_from}")
 
@@ -1070,22 +1107,15 @@ class MotionReferenceManager(SensorBase):
             env_ids=self.ALL_INDICES,
         )
 
-    def _set_debug_vis_impl(self, debug_vis: bool):
-        # set visibility of markers
-        # note: parent only deals with callbacks. not their visibility
-        if debug_vis and self.cfg.visualizing_marker_types:
+    def debug_vis(self, visualizer) -> None:
+        """Debug visualization (mjlab Sensor interface)."""
+        del visualizer
+        if not self._is_initialized:
+            return
+
+        if self.cfg.visualizing_marker_types:
             if not hasattr(self, "_visualizer"):
                 self._visualizer = VisualizationMarkers(self.cfg.visualizer_cfg)
-            # set their visibility to true
-            self._visualizer.set_visibility(True)
-        else:
-            if hasattr(self, "_visualizer"):
-                self._visualizer.set_visibility(False)
-
-    def _debug_vis_callback(self, event):
-        if self.cfg.visualizing_marker_types:
-            if not hasattr(self, "_entity") or not hasattr(self, "_visualizer"):
-                return
             aiming_frame_idx = self.aiming_frame_idx
 
             pos_list = []
@@ -1095,7 +1125,7 @@ class MotionReferenceManager(SensorBase):
             if "root" in self.cfg.visualizing_marker_types:
                 root_pos_w = self.data.base_pos_w[self.ALL_INDICES, aiming_frame_idx]
                 root_quat_w = self.data.base_quat_w[self.ALL_INDICES, aiming_frame_idx]
-                root_indices = torch.ones(self._num_envs, device=self.device, dtype=torch.long) * 0
+                root_indices = torch.zeros(self._num_envs, device=self.device, dtype=torch.long)
 
                 pos_list.append(root_pos_w.reshape(-1, 3))
                 quat_list.append(root_quat_w.reshape(-1, 4))
@@ -1104,42 +1134,32 @@ class MotionReferenceManager(SensorBase):
             if "links" in self.cfg.visualizing_marker_types:
                 link_pos_w = self.data.link_pos_w[self.ALL_INDICES, aiming_frame_idx]
                 link_quat_w = self.data.link_quat_w[self.ALL_INDICES, aiming_frame_idx]
-                link_indices = torch.ones(link_pos_w.shape[:2], device=self.device, dtype=torch.long) * 1
+                link_indices = torch.ones(link_pos_w.shape[:2], device=self.device, dtype=torch.long)
 
                 pos_list.append(link_pos_w.reshape(-1, 3))
                 quat_list.append(link_quat_w.reshape(-1, 4))
                 index_list.append(link_indices.reshape(-1))
 
             if "relative_links" in self.cfg.visualizing_marker_types:
-                link_pos_w = self.reference_link_pos_relative_w
-                link_quat_w = self.reference_link_quat_relative_w
-                link_indices = torch.ones(link_pos_w.shape[:2], device=self.device, dtype=torch.long) * 2
+                relative_link_pos_w = self.reference_link_pos_relative_w
+                relative_link_quat_w = self.reference_link_quat_relative_w
+                relative_link_indices = torch.ones(relative_link_pos_w.shape[:2], device=self.device, dtype=torch.long) * 2
 
-                pos_list.append(link_pos_w.reshape(-1, 3))
-                quat_list.append(link_quat_w.reshape(-1, 4))
-                index_list.append(link_indices.reshape(-1))
+                pos_list.append(relative_link_pos_w.reshape(-1, 3))
+                quat_list.append(relative_link_quat_w.reshape(-1, 4))
+                index_list.append(relative_link_indices.reshape(-1))
 
             if pos_list:
                 pos_w = torch.cat(pos_list, dim=0)
                 quat_w = torch.cat(quat_list, dim=0)
-                indices = torch.cat(index_list, dim=0)
+                marker_indices = torch.cat(index_list, dim=0)
                 self._visualizer.visualize(
                     translations=pos_w,
                     orientations=quat_w,
-                    marker_indices=indices,
+                    marker_indices=marker_indices,
                 )
 
         if not hasattr(self, "_reference_entity"):
             self._find_reference_view()
         if hasattr(self, "_reference_entity"):
             self._set_reference_view_state()
-
-    def _invalidate_initialize_callback(self, event):
-        """Invalidates the scene elements."""
-        # set all existing views to None to invalidate them
-        if hasattr(self, "_physics_sim_view"):
-            delattr(self, "_physics_sim_view")
-        if hasattr(self, "_entity"):
-            delattr(self, "_entity")
-        if hasattr(self, "_reference_entity"):
-            delattr(self, "_reference_entity")

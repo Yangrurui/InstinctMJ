@@ -6,8 +6,8 @@ import numpy as np
 import torch
 from typing import TYPE_CHECKING, Literal
 
-import mjlab.utils.math as math_utils
-from mjlab.envs import ManagerBasedRlEnv as ManagerBasedEnv
+from mjlab.utils.lab_api import math as math_utils
+from mjlab.envs import ManagerBasedRlEnv
 from mjlab.managers import SceneEntityCfg
 
 from instinct_mjlab.utils.math import quat_angular_velocity, quat_slerp_batch
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 def get_base_position_distance(
-    env: ManagerBasedEnv,
+    env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     reference_cfg: SceneEntityCfg = SceneEntityCfg("motion_reference"),
     masking: bool = True,
@@ -65,7 +65,7 @@ def get_base_position_distance(
 
 
 def get_base_rotation_distance(
-    env: ManagerBasedEnv,
+    env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     reference_cfg: SceneEntityCfg = SceneEntityCfg("motion_reference"),
     difference_mode: Literal["box_minus", "axis_angle"] = "axis_angle",
@@ -101,7 +101,7 @@ def get_base_rotation_distance(
 
 
 def get_base_velocity_difference(
-    env: ManagerBasedEnv,
+    env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     reference_cfg: SceneEntityCfg = SceneEntityCfg("motion_reference"),
     masking: bool = True,
@@ -158,7 +158,7 @@ def get_base_velocity_difference(
 
 
 def get_joint_position_difference(
-    env: ManagerBasedEnv,
+    env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     reference_cfg: SceneEntityCfg = SceneEntityCfg("motion_reference"),
     masking: bool = True,
@@ -184,7 +184,7 @@ def get_joint_position_difference(
 
 
 def get_joint_velocity_difference(
-    env: ManagerBasedEnv,
+    env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     reference_cfg: SceneEntityCfg = SceneEntityCfg("motion_reference"),
     masking: bool = True,
@@ -215,7 +215,7 @@ def get_joint_velocity_difference(
 
 
 def get_link_position_distance(
-    env: ManagerBasedEnv,
+    env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     reference_cfg: SceneEntityCfg = SceneEntityCfg("motion_reference"),
     in_base_frame: bool = False,
@@ -269,7 +269,7 @@ def get_link_position_distance(
 
 
 def get_link_rotation_distance(
-    env: ManagerBasedEnv,
+    env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     reference_cfg: SceneEntityCfg = SceneEntityCfg("motion_reference"),
     in_base_frame: bool = False,
@@ -327,7 +327,7 @@ def get_link_rotation_distance(
 
 
 def matching_reference_timing(
-    env: ManagerBasedEnv,
+    env: ManagerBasedRlEnv,
     buffer: torch.Tensor,
     motion_reference: MotionReferenceManager,
     check_at_keyframe_threshold: float,

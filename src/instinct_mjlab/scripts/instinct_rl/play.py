@@ -1,4 +1,8 @@
-"""Play Instinct-RL policies on migrated mjlab tasks."""
+"""Play Instinct-RL policies on migrated mjlab tasks.
+
+Original: InstinctLab/scripts/instinct_rl/play.py
+Migrated: replaces Isaac Sim / Isaac Lab runtime with mjlab + tyro CLI.
+"""
 
 from __future__ import annotations
 
@@ -16,11 +20,10 @@ from instinct_rl.runners import OnPolicyRunner
 import instinct_mjlab.tasks  # noqa: F401
 import mjlab
 from instinct_mjlab.rl import InstinctRlVecEnvWrapper
-from instinct_mjlab.scripts._utils import (
+from instinct_mjlab.utils.distillation import prepare_distillation_algorithm_cfg
+from instinct_mjlab.utils.motion_validation import (
   find_default_tracking_motion_file,
-  prepare_distillation_algorithm_cfg,
   resolve_datasets_root,
-  to_serializable,
   validate_tracking_motion_file,
 )
 from instinct_mjlab.tasks.registry import (
@@ -261,7 +264,7 @@ def _export_policy_to_onnx(
   }
   metadata_path = export_dir / "metadata.json"
   metadata_path.write_text(
-    json.dumps(to_serializable(metadata), ensure_ascii=False, indent=2),
+    json.dumps(metadata, ensure_ascii=False, indent=2),
     encoding="utf-8",
   )
   print(f"[INFO] Exported ONNX artifacts to: {export_dir}")

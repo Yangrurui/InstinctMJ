@@ -16,7 +16,7 @@ omni_log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .motion_reference_cfg import MotionBufferCfg
-    from mjlab.scene import Scene as InteractiveScene
+    from mjlab.scene import Scene
 
 import torch
 
@@ -217,7 +217,7 @@ class MotionBuffer:
         """
         pass  # Nothing happens by default, but can be overridden by subclasses.
 
-    def match_scene(self, scene: InteractiveScene):
+    def match_scene(self, scene: Scene):
         """Let the motion buffer match the scene.
         For example a scene-interactive motion may need to match the motion starting point to the terrain.
         Recommended to call `scene.terrain.terrain_origins` and `scene.terrain.subterrain_specific_cfgs`

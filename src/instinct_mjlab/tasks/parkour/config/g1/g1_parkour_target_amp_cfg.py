@@ -24,7 +24,6 @@ from instinct_mjlab.assets.unitree_g1 import (
   beyondmimic_action_scale,
   beyondmimic_g1_29dof_delayed_actuator_cfgs,
 )
-from instinct_mjlab.motion_reference.utils import motion_interpolate_bilinear
 from instinct_mjlab.tasks.parkour.config.parkour_env_cfg import (
   set_parkour_amp_observations,
   set_parkour_basic_settings,
@@ -38,7 +37,7 @@ from instinct_mjlab.tasks.parkour.config.parkour_env_cfg import (
   set_parkour_terminations,
   set_parkour_terrain,
 )
-from instinct_mjlab.utils.datasets import resolve_datasets_root
+from instinct_mjlab.utils.motion_validation import resolve_datasets_root
 
 _DATASETS_ROOT = resolve_datasets_root()
 _PARKOUR_TASK_DIR = Path(__file__).resolve().parents[2]
@@ -50,10 +49,28 @@ _PARKOUR_G1_WITH_SHOE_MJCF_PATH = (
 # ---------------------------------------------------------------------------
 # Motion reference configs (mirrors InstinctLab AmassMotionCfg)
 # ---------------------------------------------------------------------------
+# NOTE(migration): In the original InstinctLab, MotionReferenceManagerCfg
+# used ``motion_buffers = {"run_walk": AmassMotionCfg()}`` to load AMASS
+# motion data for AMP discriminator observations.
+#
+# In the mjlab migration, motion reference is provided by the tracking
+# base's ``commands["motion"]`` (MotionCommandCfg), which is inherited
+# from ``unitree_g1_flat_tracking_env_cfg()``.  The ``motion_file``
+# field is intentionally left empty and set at runtime by training
+# scripts (e.g. via CLI override or config injection).
+#
+# These classes are retained as config references for script-level
+# motion file resolution and retargeting pipeline compatibility.
+# ---------------------------------------------------------------------------
 
 
 class AmassMotionCfgBase:
-  """AmassMotion baseline config used by motion_reference."""
+  """AmassMotion baseline config used by motion_reference.
+
+  NOTE(migration): This class is retained as a reference for motion file
+  resolution parameters.  The ``motion_interpolate_func`` references the
+  original ``motion_interpolate_bilinear`` utility.
+  """
   path = str(_DATASETS_ROOT)
   retargetting_func = None
   filtered_motion_selection_filepath = str(
@@ -63,7 +80,8 @@ class AmassMotionCfgBase:
   motion_start_height_offset = 0.0
   ensure_link_below_zero_ground = False
   buffer_device = "output_device"
-  motion_interpolate_func = motion_interpolate_bilinear
+  # Original: motion_interpolate_bilinear from instinct_mjlab.motion_reference.utils
+  motion_interpolate_func = None
   velocity_estimation_method = "frontward"
 
 
@@ -249,4 +267,3 @@ class G1ParkourEnvCfg_PLAY(ManagerBasedRlEnvCfg):
   def __init__(self):
     cfg = instinct_g1_parkour_amp_final_cfg(play=True, shoe=True)
     super().__init__(**{f.name: getattr(cfg, f.name) for f in cfg.__dataclass_fields__.values()})
-

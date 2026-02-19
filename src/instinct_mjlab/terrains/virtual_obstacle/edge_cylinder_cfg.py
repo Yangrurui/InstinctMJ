@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field
 
 import math
 from typing import TYPE_CHECKING, Literal
@@ -34,7 +34,7 @@ class _SphereMarkerCfg:
 class EdgeCylinderCfg(VirtualObstacleCfg):
     """The class to use for the edge cylinder detector."""
 
-    class_type: type | None = None
+    class_type: type = MISSING
     """The class to use for the edge detector."""
     angle_threshold: float = 70.0
     """The angle threshold to consider an edge as sharp."""

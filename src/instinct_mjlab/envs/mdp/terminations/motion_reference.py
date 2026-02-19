@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from typing import TYPE_CHECKING
 
-import mjlab.utils.math as math_utils
+from mjlab.utils.lab_api import math as math_utils
 from mjlab.managers import ManagerTermBase, SceneEntityCfg
 
 import instinct_mjlab.motion_reference.utils as motion_reference_utils

@@ -80,6 +80,8 @@ class PerceptiveShadowingSceneCfg(InteractiveSceneCfg):
             sub_terrains={
                 "motion_matched": MotionMatchedTerrainCfg(
                     proportion=1.0,
+                    path="PLACEHOLDER",  # Will be overridden in concrete env cfg __post_init__
+                    metadata_yaml="PLACEHOLDER",  # Will be overridden in concrete env cfg __post_init__
                 ),
             },
         ),
@@ -231,7 +233,7 @@ class PerceptiveShadowingSceneCfg(InteractiveSceneCfg):
             sensor_list.append(self.motion_reference)
         self.sensors = tuple(sensor_list)
 
-        if self.motion_reference is None or not self.motion_reference.debug_vis:
+        if self.motion_reference is None or self.motion_reference.reference_entity_name is None:
             if "robot_reference" in self.entities:
                 del self.entities["robot_reference"]
             if hasattr(self, "robot_reference"):

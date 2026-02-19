@@ -1,13 +1,17 @@
-"""Train Instinct-RL policies on top of mjlab environments."""
+"""Train Instinct-RL policies on top of mjlab environments.
+
+Original: InstinctLab/scripts/instinct_rl/train.py
+Migrated: replaces Isaac Sim / Isaac Lab runtime with mjlab + tyro CLI.
+"""
 
 from __future__ import annotations
 
 import os
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import torch
 import tyro
@@ -16,14 +20,15 @@ from instinct_rl.runners import OnPolicyRunner
 import instinct_mjlab.tasks  # noqa: F401
 import mjlab
 from instinct_mjlab.rl import InstinctRlOnPolicyRunnerCfg, InstinctRlVecEnvWrapper
-from instinct_mjlab.scripts._utils import (
-  find_default_tracking_motion_file,
+from instinct_mjlab.utils.distillation import (
   prepare_distillation_algorithm_cfg,
-  resolve_datasets_root,
-  to_serializable,
-  validate_tracking_motion_file,
   validate_distillation_runtime_cfg,
   validate_distillation_teacher_assets,
+)
+from instinct_mjlab.utils.motion_validation import (
+  find_default_tracking_motion_file,
+  resolve_datasets_root,
+  validate_tracking_motion_file,
 )
 from instinct_mjlab.tasks.registry import (
   list_tasks,
@@ -37,6 +42,20 @@ from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.utils.os import dump_yaml, get_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wrappers import VideoRecorder
+
+
+def _to_yaml_data(data: Any) -> Any:
+  if is_dataclass(data):
+    return {item.name: _to_yaml_data(getattr(data, item.name)) for item in fields(data)}
+  if isinstance(data, dict):
+    return {str(key): _to_yaml_data(value) for key, value in data.items()}
+  if isinstance(data, tuple):
+    return [_to_yaml_data(value) for value in data]
+  if isinstance(data, list):
+    return [_to_yaml_data(value) for value in data]
+  if isinstance(data, (str, int, float, bool)) or data is None:
+    return data
+  return repr(data)
 
 
 @dataclass(frozen=True)
@@ -215,8 +234,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     print(f"[INFO] Resuming from checkpoint: {resume_path}")
     runner.load(str(resume_path))
 
-  dump_yaml(log_dir / "params" / "env.yaml", to_serializable(cfg.env))
-  dump_yaml(log_dir / "params" / "agent.yaml", to_serializable(cfg.agent))
+  dump_yaml(log_dir / "params" / "env.yaml", _to_yaml_data(cfg.env))
+  dump_yaml(log_dir / "params" / "agent.yaml", _to_yaml_data(cfg.agent))
   if registry_name is not None:
     dump_yaml(
       log_dir / "params" / "registry.yaml",

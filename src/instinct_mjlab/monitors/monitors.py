@@ -6,7 +6,7 @@ import torch
 from torch.distributions import Multinomial
 from typing import TYPE_CHECKING, Sequence
 
-import mjlab.utils.math as math_utils
+from mjlab.utils.lab_api import math as math_utils
 from mjlab.managers import SceneEntityCfg
 
 from instinct_mjlab.motion_reference.utils import (

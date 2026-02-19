@@ -1,155 +1,13 @@
-"""Shared script helpers."""
+"""Distillation (TPPO/VaeDistill) configuration helpers."""
 
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import torch
 import yaml
-from instinct_mjlab.utils.datasets import resolve_datasets_root as _resolve_datasets_root
-
-_TRACKING_MOTION_REQUIRED_KEYS = (
-  "joint_pos",
-  "joint_vel",
-  "body_pos_w",
-  "body_quat_w",
-  "body_lin_vel_w",
-  "body_ang_vel_w",
-)
-
-
-def to_serializable(data: Any) -> Any:
-  if is_dataclass(data):
-    return {item.name: to_serializable(getattr(data, item.name)) for item in fields(data)}
-  if isinstance(data, dict):
-    return {str(key): to_serializable(value) for key, value in data.items()}
-  if isinstance(data, tuple):
-    return [to_serializable(value) for value in data]
-  if isinstance(data, list):
-    return [to_serializable(value) for value in data]
-  if isinstance(data, (str, int, float, bool)) or data is None:
-    return data
-  return repr(data)
-
-
-def resolve_datasets_root() -> Path:
-  """Resolve datasets root for script entry points."""
-  return _resolve_datasets_root()
-
-
-def _tracking_motion_missing_keys(motion_path: Path) -> tuple[str, ...]:
-  with np.load(motion_path) as data:
-    keys = set(data.files)
-  missing = tuple(key for key in _TRACKING_MOTION_REQUIRED_KEYS if key not in keys)
-  return missing
-
-
-def validate_tracking_motion_file(motion_path: Path) -> None:
-  """Validate motion npz schema expected by `mjlab.tasks.tracking.mdp.MotionLoader`."""
-  if not motion_path.exists() or not motion_path.is_file():
-    raise FileNotFoundError(f"Motion file not found: {motion_path}")
-  missing_keys = _tracking_motion_missing_keys(motion_path)
-  if missing_keys:
-    raise ValueError(
-      "motion 文件格式不匹配 mjlab tracking 期望字段："
-      f" {motion_path}\n"
-      f"缺失 keys: {list(missing_keys)}\n"
-      f"期望 keys: {list(_TRACKING_MOTION_REQUIRED_KEYS)}"
-    )
-
-
-def _find_parkour_motion_from_task_cfg() -> Path | None:
-  """Resolve Parkour default motion from task config (InstinctLab-style path/yaml)."""
-  try:
-    from instinct_mjlab.tasks.parkour.config.g1.g1_parkour_target_amp_cfg import (
-      AmassMotionCfg,
-    )
-  except Exception:
-    return None
-
-  configured_root_str = str(getattr(AmassMotionCfg, "path", "")).strip()
-  if not configured_root_str:
-    return None
-  configured_root = Path(configured_root_str).expanduser()
-
-  yaml_path_str = getattr(AmassMotionCfg, "filtered_motion_selection_filepath", None)
-  candidate_paths: list[Path] = []
-
-  if yaml_path_str is not None and str(yaml_path_str).strip():
-    yaml_path = Path(str(yaml_path_str)).expanduser()
-    if yaml_path.exists() and yaml_path.is_file():
-      try:
-        with yaml_path.open("r", encoding="utf-8") as file:
-          loaded_yaml = yaml.safe_load(file) or {}
-      except (yaml.YAMLError, OSError):
-        yaml_data = {}
-      else:
-        yaml_data = loaded_yaml if isinstance(loaded_yaml, dict) else {}
-      selected_files = yaml_data.get("selected_files", [])
-      if isinstance(selected_files, list):
-        for selected_file in selected_files:
-          selected_text = str(selected_file).strip()
-          if not selected_text:
-            continue
-          selected_path = Path(selected_text).expanduser()
-          if selected_path.is_absolute():
-            candidate_paths.append(selected_path)
-          else:
-            candidate_paths.append(configured_root / selected_path)
-            candidate_paths.extend(configured_root.rglob(selected_path.name))
-
-  for pattern in ("**/motion.npz", "**/*parkour*motion*.npz", "**/*parkour*.npz"):
-    candidate_paths.extend(configured_root.glob(pattern))
-
-  seen: set[Path] = set()
-  for path in candidate_paths:
-    resolved_path = path.expanduser().resolve()
-    if resolved_path in seen:
-      continue
-    seen.add(resolved_path)
-    if not resolved_path.exists() or not resolved_path.is_file():
-      continue
-    try:
-      validate_tracking_motion_file(resolved_path)
-    except (ValueError, OSError, FileNotFoundError):
-      continue
-    return resolved_path
-  return None
-
-
-def find_default_tracking_motion_file(task_id: str) -> Path | None:
-  """Best-effort search for a usable tracking motion file from datasets root."""
-  if "Parkour" in task_id:
-    from_task_cfg = _find_parkour_motion_from_task_cfg()
-    if from_task_cfg is not None:
-      return from_task_cfg
-
-  datasets_root = resolve_datasets_root()
-  if not datasets_root.exists() or not datasets_root.is_dir():
-    return None
-
-  candidate_patterns: list[str] = ["**/motion.npz"]
-  if "Parkour" in task_id:
-    candidate_patterns = [
-      "**/*parkour*motion*.npz",
-      "**/*parkour*.npz",
-      *candidate_patterns,
-    ]
-
-  for pattern in candidate_patterns:
-    for path in sorted(datasets_root.glob(pattern)):
-      if not path.is_file():
-        continue
-      try:
-        validate_tracking_motion_file(path)
-      except (ValueError, OSError, FileNotFoundError):
-        continue
-      return path.resolve()
-  return None
 
 
 def prepare_distillation_algorithm_cfg(
@@ -190,7 +48,6 @@ def prepare_distillation_algorithm_cfg(
     teacher_obs_format = teacher_policy["obs_format"]
     if not isinstance(teacher_obs_format, dict):
       raise TypeError("algorithm.teacher_policy.obs_format must be a dict for TPPO/VaeDistill")
-
     normalized_obs_format: dict[str, dict[str, tuple[int, ...]]] = {}
     for group_name, group_format in teacher_obs_format.items():
       if not isinstance(group_format, dict):

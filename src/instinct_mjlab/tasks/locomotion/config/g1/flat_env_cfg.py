@@ -431,7 +431,7 @@ def instinct_g1_locomotion_flat_env_cfg(*, play: bool = False) -> ManagerBasedRl
         solver="newton",
         iterations=100,
         ls_iterations=50,
-        ccd_iterations=50,
+        ccd_iterations=500 if not play else 50,
       ),
     ),
     decimation=4,

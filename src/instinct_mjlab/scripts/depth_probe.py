@@ -12,7 +12,7 @@ import tyro
 
 import instinct_mjlab.tasks  # noqa: F401
 import mjlab
-from instinct_mjlab.scripts._utils import (
+from instinct_mjlab.utils.motion_validation import (
   find_default_tracking_motion_file,
   resolve_datasets_root,
   validate_tracking_motion_file,

@@ -610,7 +610,6 @@ def set_parkour_observations(cfg: ManagerBasedRlEnvCfg) -> None:
       noise=None,
     ),
   }
-  actor_terms["command"] = actor_terms["velocity_commands"]
   critic_terms = {
     "base_lin_vel": ObservationTermCfg(
       func=envs_mdp.base_lin_vel,
@@ -670,20 +669,15 @@ def set_parkour_observations(cfg: ManagerBasedRlEnvCfg) -> None:
       noise=None,
     ),
   }
-  critic_terms["command"] = critic_terms["velocity_commands"]
   cfg.observations["actor"] = ObservationGroupCfg(
     terms=actor_terms,
     concatenate_terms=False,
     enable_corruption=True,
-    nan_policy="sanitize",
-    nan_check_per_term=True,
   )
   cfg.observations["critic"] = ObservationGroupCfg(
     terms=critic_terms,
     concatenate_terms=False,
     enable_corruption=False,
-    nan_policy="sanitize",
-    nan_check_per_term=True,
   )
 
 
@@ -762,15 +756,11 @@ def set_parkour_amp_observations(cfg: ManagerBasedRlEnvCfg) -> None:
     terms=amp_policy_terms,
     concatenate_terms=False,
     enable_corruption=False,
-    nan_policy="sanitize",
-    nan_check_per_term=True,
   )
   cfg.observations["amp_reference"] = ObservationGroupCfg(
     terms=amp_reference_terms,
     concatenate_terms=False,
     enable_corruption=False,
-    nan_policy="sanitize",
-    nan_check_per_term=True,
   )
 
 
@@ -1042,22 +1032,6 @@ def set_parkour_events(cfg: ManagerBasedRlEnvCfg) -> None:
       mode="startup",
       params={"sensor_cfgs": SceneEntityCfg(_LEG_VOLUME_POINTS_SENSOR_NAME)},
     ),
-    "push_robot": EventTermCfg(
-      func=parkour_mdp.push_by_setting_velocity_without_stand,
-      mode="interval",
-      interval_range_s=(6.0, 10.0),
-      params={
-        "velocity_range": {
-          "x": (-0.5, 0.5),
-          "y": (-0.5, 0.5),
-          "z": (0.0, 0.0),
-          "roll": (0.0, 0.0),
-          "pitch": (0.0, 0.0),
-          "yaw": (-0.5, 0.5),
-        },
-        "command_name": _BASE_VELOCITY_COMMAND_NAME,
-      },
-    ),
     "reset_robot_joints": EventTermCfg(
       func=envs_mdp.reset_joints_by_offset,
       mode="reset",
@@ -1154,7 +1128,6 @@ def set_parkour_play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
 
   cfg.terminations["root_height"] = None
   cfg.events["physics_material"] = None
-  cfg.events["push_robot"] = None
 
   cfg.events["reset_robot_joints"].params = {
     "position_range": (0.0, 0.0),

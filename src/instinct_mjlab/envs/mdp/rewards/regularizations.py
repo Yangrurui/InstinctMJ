@@ -911,16 +911,51 @@ def undesired_contacts(
     env: ManagerBasedRLEnv,
     threshold: float,
     sensor_name: str,
+    asset_cfg: SceneEntityCfg | None = None,
 ) -> torch.Tensor:
-    """Penalize undesired contacts as the number of violations that are above a threshold."""
+    """Penalize undesired contacts as the number of violations that are above a threshold.
+
+    Mirrors Isaac Lab's ``mdp.undesired_contacts``: for each body, check if the
+    maximum contact-force magnitude over the sensor's history window exceeds the
+    threshold, then count these bodies.
+
+    When ``history_length > 0`` is configured on the sensor, ``force_history``
+    (shape ``[B, N, H, 3]``) is used and the maximum is taken over the history
+    dimension – matching the original ``torch.max(..., dim=1)`` over
+    ``net_forces_w_history``.  When no history is available, falls back to the
+    instantaneous ``force`` (shape ``[B, N, 3]``).
+    
+    Args:
+        env: The environment.
+        threshold: Force threshold for contact detection.
+        sensor_name: Name of the contact sensor.
+        asset_cfg: Optional SceneEntityCfg to filter specific bodies. If provided,
+            only contacts on the specified bodies are considered.
+    """
     # extract the used quantities (to enable type-hinting)
     contact_sensor: ContactSensor = env.scene[sensor_name]
-    # check if contact force is above threshold
-    # In mjlab, the sensor is pre-configured with the right body exclusions via ContactMatch.
-    # contact_sensor.data.force has shape [B, N, 3] where N is the number of primary matches.
-    force = contact_sensor.data.force
-    if force is None:
-        return torch.zeros(env.num_envs, device=env.device)
-    is_contact = torch.norm(force, dim=-1) > threshold  # (B, N)
+    
+    # Prefer force_history [B, N, H, 3] when available (matches Isaac Lab's net_forces_w_history behaviour).
+    force_history = contact_sensor.data.force_history
+    if force_history is not None:
+        # force_history shape: [B, N, H, 3]
+        # Take the norm of each force vector, then max over history steps per body.
+        force_norms = torch.norm(force_history, dim=-1)  # (B, N, H)
+        max_force_norms = torch.max(force_norms, dim=-1)[0]  # (B, N)
+        is_contact = max_force_norms > threshold  # (B, N)
+    else:
+        # Fallback: instantaneous force [B, N, 3]
+        force = contact_sensor.data.force
+        if force is None:
+            return torch.zeros(env.num_envs, device=env.device)
+        is_contact = torch.norm(force, dim=-1) > threshold  # (B, N)
+    
+    # Filter by body_ids if asset_cfg is provided (like Isaac Lab)
+    if asset_cfg is not None:
+        # Resolve body_ids from asset_cfg
+        body_ids = asset_cfg.resolve(env.scene).body_ids
+        # Index only the specified bodies
+        is_contact = is_contact[:, body_ids]
+    
     # sum over contacts for each environment
     return torch.sum(is_contact.float(), dim=1)

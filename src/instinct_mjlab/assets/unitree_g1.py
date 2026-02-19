@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import copy
+import os
 from typing import TypeAlias
+
+import mujoco
 
 from mjlab.actuator import (
   ActuatorCfg,
@@ -11,23 +14,15 @@ from mjlab.actuator import (
   DelayedActuatorCfg,
 )
 from mjlab.asset_zoo.robots.unitree_g1 import g1_constants as _g1
-from mjlab.entity import EntityCfg
+from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 
-# MJCF (XML) path for PyTorch Kinematics – replaces the old URDF-based path.
-G1_MJCF_PATH: str = str(_g1.G1_XML)
+__file_dir__ = os.path.dirname(os.path.realpath(__file__))
 
-# Isaac Lab config objects have a .replace() method; mjlab EntityCfg does not.
-# Monkey-patch a generic replace that deepcopies + sets arbitrary attributes
-# (including non-field attrs like prim_path which only exist in Isaac Lab).
-if not hasattr(EntityCfg, "replace"):
-
-    def _entity_replace(self, **kwargs):
-        obj = copy.deepcopy(self)
-        for k, v in kwargs.items():
-            setattr(obj, k, v)
-        return obj
-
-    EntityCfg.replace = _entity_replace
+# MJCF (XML) path – uses the local 29-dof torso-base popsicle model,
+# matching InstinctLab's G1_29DOF_TORSOBASE_POPSICLE_CFG.
+G1_MJCF_PATH: str = os.path.join(
+  __file_dir__, "resources/unitree_g1/xml/g1_29dof_torsobase_popsicle.xml"
+)
 
 LimitCfg: TypeAlias = float | dict[str, float]
 
@@ -67,8 +62,61 @@ joint name order:
 """
 
 
-def _new_g1_cfg() -> EntityCfg:
-  return copy.deepcopy(_g1.get_g1_robot_cfg())
+def _get_popsicle_spec() -> mujoco.MjSpec:
+  """Load the local g1_29dof_torsobase_popsicle.xml as MjSpec.
+
+  The free joint is attached to `torso_link`, so root pose/init_state is applied on torso_link.
+  """
+  return mujoco.MjSpec.from_file(G1_MJCF_PATH)
+
+
+# Initial state matching InstinctLab G1_29DOF_TORSOBASE_CFG (simplified variant).
+# NOTE: pos is the root (torso_link) world position.
+_SIMPLIFIED_INIT_STATE = EntityCfg.InitialStateCfg(
+  pos=(0.0, 0.0, 0.82),
+  joint_pos={
+    ".*_hip_pitch_joint": -0.20,
+    ".*_knee_joint": 0.42,
+    ".*_ankle_pitch_joint": -0.23,
+    ".*_elbow_joint": 0.87,
+    ".*_wrist_roll_joint": 0.0,
+    ".*_wrist_pitch_joint": 0.0,
+    ".*_wrist_yaw_joint": 0.0,
+    "left_shoulder_roll_joint": 0.16,
+    "left_shoulder_pitch_joint": 0.35,
+    "right_shoulder_roll_joint": -0.16,
+    "right_shoulder_pitch_joint": 0.35,
+  },
+  joint_vel={".*": 0.0},
+)
+
+# Initial state matching InstinctLab G1_29DOF_TORSOBASE_POPSICLE_CFG.
+# NOTE: pos is the root (torso_link) world position.
+_POPSICLE_INIT_STATE = EntityCfg.InitialStateCfg(
+  pos=(0.0, 0.0, 0.82),
+  joint_pos={
+    ".*_hip_pitch_joint": -0.312,
+    ".*_knee_joint": 0.669,
+    ".*_ankle_pitch_joint": -0.363,
+    ".*_elbow_joint": 0.6,
+    "left_shoulder_roll_joint": 0.2,
+    "left_shoulder_pitch_joint": 0.2,
+    "right_shoulder_roll_joint": -0.2,
+    "right_shoulder_pitch_joint": 0.2,
+  },
+  joint_vel={".*": 0.0},
+)
+
+
+def _new_g1_cfg(
+  init_state: EntityCfg.InitialStateCfg | None = None,
+) -> EntityCfg:
+  """Create a fresh G1 robot config using the local popsicle XML."""
+  return EntityCfg(
+    init_state=copy.deepcopy(init_state or _POPSICLE_INIT_STATE),
+    spec_fn=_get_popsicle_spec,
+    articulation=EntityArticulationInfoCfg(),
+  )
 
 
 def _set_robot_actuators(
@@ -305,18 +353,19 @@ beyondmimic_g1_29dof_delayed_actuator_cfgs: tuple[ActuatorCfg, ...] = tuple(
 
 
 G1_29DOF_TORSOBASE_CFG = _set_robot_actuators(
-  _new_g1_cfg(),
+  _new_g1_cfg(init_state=_SIMPLIFIED_INIT_STATE),
   g1_29dof_torsobase_delayed_actuator_cfgs,
   soft_joint_pos_limit_factor=0.95,
 )
 G1_29DOF_TORSOBASE_CLOG_CFG = _set_robot_actuators(
-  _new_g1_cfg(),
+  _new_g1_cfg(init_state=_SIMPLIFIED_INIT_STATE),
   g1_29dof_torsobase_delayed_actuator_cfgs,
   soft_joint_pos_limit_factor=0.95,
 )
 G1_29DOF_TORSOBASE_POPSICLE_CFG = _set_robot_actuators(
-  _new_g1_cfg(),
+  _new_g1_cfg(init_state=_POPSICLE_INIT_STATE),
   beyondmimic_g1_29dof_actuator_cfgs,
+  soft_joint_pos_limit_factor=0.9,
 )
 
 

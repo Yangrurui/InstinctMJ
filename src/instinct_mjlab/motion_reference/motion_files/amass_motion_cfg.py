@@ -16,7 +16,7 @@ class AmassMotionCfg(MotionBufferCfg):
 
     class_type: type = AmassMotion
 
-    path: str = None  # type: ignore
+    path: str | None = None
     """ the path to the motion dataset """
 
     supported_file_endings: Sequence[str] = field(
@@ -111,3 +111,7 @@ class AmassMotionCfg(MotionBufferCfg):
 
     ensure_link_below_zero_ground: bool = True
     """ Whether to ensure no link is below zero ground by raising the base position if necessary. """
+
+    def __post_init__(self) -> None:
+        """Post-initialization to ensure required fields are set."""
+        assert self.path is not None, "AmassMotionCfg.path must be provided."

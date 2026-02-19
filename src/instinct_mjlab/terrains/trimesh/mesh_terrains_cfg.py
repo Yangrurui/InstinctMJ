@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field
 from typing import List
 
 from mjlab.terrains.terrain_generator_cfg import SubTerrainBaseCfg
@@ -26,11 +26,11 @@ class MotionMatchedTerrainCfg(SubTerrainBaseCfg):
     function: object = mesh_terrains.motion_matched_terrain
 
 
-    path: str = None
+    path: str = MISSING
     """Directory containing both terrains and the motions, so that these can be matched together.
     """
 
-    metadata_yaml: str = None
+    metadata_yaml: str = MISSING
     """YAML file containing the motion matching configuration.
     This file should specify the motion matching parameters, such as the motion files to be used,
     the matching criteria, and any other relevant settings.
@@ -63,13 +63,13 @@ class PerlinMeshFloatingBoxTerrainCfg(SubTerrainBaseCfg, WallTerrainCfgMixin):
 
     function: object = mesh_terrains.floating_box_terrain
 
-    floating_height: tuple[float, float] | float = None
+    floating_height: tuple[float, float] | float = MISSING
     """The height of the box above the ground. Could be a fixed value or a range (min, max)."""
-    box_length: tuple[float, float] | float = None
+    box_length: tuple[float, float] | float = MISSING
     """The length of the box along the y-axis. Could be a fixed value or a range (min, max)."""
     box_width: float | None = None
     """The width of the box along the x-axis. If None, it will be equal to the width of the terrain."""
-    box_height: tuple[float, float] | float = None
+    box_height: tuple[float, float] | float = MISSING
     """The height of the box along the z-axis."""
     perlin_cfg: PerlinPlaneTerrainCfg | None = None
 
@@ -86,15 +86,15 @@ class PerlinMeshRandomMultiBoxTerrainCfg(SubTerrainBaseCfg, WallTerrainCfgMixin)
 
     function: object = mesh_terrains.random_multi_box_terrain
 
-    box_height_mean: tuple[float, float] | float = None
-    box_height_range: float = None
-    box_length_mean: tuple[float, float] | float = None
-    box_length_range: float = None
-    box_width_mean: tuple[float, float] | float = None
-    box_width_range: float = None
-    platform_width: float = None
+    box_height_mean: tuple[float, float] | float = MISSING
+    box_height_range: float = MISSING
+    box_length_mean: tuple[float, float] | float = MISSING
+    box_length_range: float = MISSING
+    box_width_mean: tuple[float, float] | float = MISSING
+    box_width_range: float = MISSING
+    platform_width: float = MISSING
 
-    generation_ratio: float = None
+    generation_ratio: float = MISSING
 
     perlin_cfg: PerlinPlaneTerrainCfg | None = None
     horizontal_scale: float = 0.1

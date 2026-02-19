@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass
 
 import torch
 import trimesh
@@ -13,10 +13,10 @@ from mjlab.markers import VisualizationMarkersCfg
 class VirtualObstacleCfg:
     """Configuration for a virtual obstacle."""
 
-    class_type: type | None = None
+    class_type: type = MISSING
     """The class to use for the virtual obstacle."""
 
-    visualizer: VisualizationMarkersCfg | None = None
+    visualizer: VisualizationMarkersCfg = MISSING
     """The visualizer configuration for the virtual obstacle."""
 
 

@@ -36,9 +36,6 @@ from instinct_mjlab.monitors import (
     TorqueMonitorSensorCfg,
 )
 from instinct_mjlab.motion_reference import MotionReferenceManagerCfg
-from instinct_mjlab.tasks.shadowing.manager_dict import (
-    observation_terms_from_class,
-)
 from instinct_mjlab.terrains.height_field import PerlinPlaneTerrainCfg
 
 
@@ -124,7 +121,7 @@ class ShadowingSceneCfg(InteractiveSceneCfg):
             sensor_list.append(self.motion_reference)
         self.sensors = tuple(sensor_list)
 
-        if self.motion_reference is None or not self.motion_reference.debug_vis:
+        if self.motion_reference is None or self.motion_reference.reference_entity_name is None:
             if "robot_reference" in self.entities:
                 del self.entities["robot_reference"]
             if hasattr(self, "robot_reference"):

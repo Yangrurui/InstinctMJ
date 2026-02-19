@@ -20,28 +20,18 @@ def track_lin_vel_xy_exp(
   std: float,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-  """Reward tracking reference linear velocity (x/y in anchor frame)."""
-  command_term = env.command_manager.get_term(command_name)
+  """Reward tracking reference linear velocity (x/y in body frame).
+
+  Mirrors the original InstinctLab ``track_lin_vel_xy_exp`` which uses
+  ``env.command_manager.get_command(command_name)[:, :2]`` directly.
+  """
   asset: Entity = env.scene[asset_cfg.name]
-
-  if hasattr(command_term, "anchor_quat_w") and hasattr(command_term, "anchor_lin_vel_w"):
-    ref_lin_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.anchor_lin_vel_w)
-    if hasattr(command_term, "robot_anchor_lin_vel_w"):
-      robot_lin_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.robot_anchor_lin_vel_w)
-    else:
-      robot_lin_vel_b = asset.data.root_link_lin_vel_b
-  else:
-    command = env.command_manager.get_command(command_name)
-    if command.shape[1] < 3:
-      raise ValueError(
-        f"Command '{command_name}' must have at least 3 dims (vx, vy, wz), got {command.shape[1]}."
-      )
-    ref_lin_vel_b = torch.zeros((env.num_envs, 3), device=env.device, dtype=command.dtype)
-    ref_lin_vel_b[:, :2] = command[:, :2]
-    robot_lin_vel_b = asset.data.root_link_lin_vel_b
-
-  error = torch.sum(torch.square(ref_lin_vel_b[:, :2] - robot_lin_vel_b[:, :2]), dim=1)
-  return torch.exp(-error / max(std, 1e-6) ** 2)
+  command = env.command_manager.get_command(command_name)
+  lin_vel_error = torch.sum(
+    torch.square(command[:, :2] - asset.data.root_link_lin_vel_b[:, :2]),
+    dim=1,
+  )
+  return torch.exp(-lin_vel_error / max(std, 1e-6) ** 2)
 
 
 def track_ang_vel_z_exp(
@@ -50,42 +40,23 @@ def track_ang_vel_z_exp(
   std: float,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-  """Reward tracking reference yaw angular velocity (anchor frame)."""
-  command_term = env.command_manager.get_term(command_name)
+  """Reward tracking reference yaw angular velocity (body frame).
+
+  Mirrors the original InstinctLab ``track_ang_vel_z_exp`` which uses
+  ``env.command_manager.get_command(command_name)[:, 2]`` directly.
+  """
   asset: Entity = env.scene[asset_cfg.name]
-
-  if hasattr(command_term, "anchor_quat_w") and hasattr(command_term, "anchor_ang_vel_w"):
-    ref_ang_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.anchor_ang_vel_w)
-    if hasattr(command_term, "robot_anchor_ang_vel_w"):
-      robot_ang_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.robot_anchor_ang_vel_w)
-    else:
-      robot_ang_vel_b = asset.data.root_link_ang_vel_b
-  else:
-    command = env.command_manager.get_command(command_name)
-    if command.shape[1] < 3:
-      raise ValueError(
-        f"Command '{command_name}' must have at least 3 dims (vx, vy, wz), got {command.shape[1]}."
-      )
-    ref_ang_vel_b = torch.zeros((env.num_envs, 3), device=env.device, dtype=command.dtype)
-    ref_ang_vel_b[:, 2] = command[:, 2]
-    robot_ang_vel_b = asset.data.root_link_ang_vel_b
-
-  error = torch.square(ref_ang_vel_b[:, 2] - robot_ang_vel_b[:, 2])
-  return torch.exp(-error / max(std, 1e-6) ** 2)
+  command = env.command_manager.get_command(command_name)
+  ang_vel_error = torch.square(command[:, 2] - asset.data.root_link_ang_vel_b[:, 2])
+  return torch.exp(-ang_vel_error / max(std, 1e-6) ** 2)
 
 
 def heading_error(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-  """Compute heading command magnitude (InstinctLab-compatible)."""
-  command_term = env.command_manager.get_term(command_name)
-  if hasattr(command_term, "anchor_quat_w") and hasattr(command_term, "anchor_ang_vel_w"):
-    ref_ang_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.anchor_ang_vel_w)
-    return torch.abs(ref_ang_vel_b[:, 2])
+  """Compute heading command magnitude (InstinctLab-compatible).
 
+  Mirrors the original: ``torch.abs(env.command_manager.get_command(command_name)[:, 2])``.
+  """
   command = env.command_manager.get_command(command_name)
-  if command.shape[1] < 3:
-    raise ValueError(
-      f"Command '{command_name}' must have at least 3 dims (vx, vy, wz), got {command.shape[1]}."
-    )
   return torch.abs(command[:, 2])
 
 
@@ -94,21 +65,14 @@ def dont_wait(
   command_name: str,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-  """Penalize standing still when there is a forward velocity command."""
-  command_term = env.command_manager.get_term(command_name)
-  asset: Entity = env.scene[asset_cfg.name]
+  """Penalize standing still when there is a forward velocity command.
 
-  if hasattr(command_term, "anchor_quat_w") and hasattr(command_term, "anchor_lin_vel_w"):
-    ref_lin_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.anchor_lin_vel_w)
-    if hasattr(command_term, "robot_anchor_lin_vel_w"):
-      robot_lin_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.robot_anchor_lin_vel_w)
-    else:
-      robot_lin_vel_b = asset.data.root_link_lin_vel_b
-    lin_vel_cmd_x = ref_lin_vel_b[:, 0]
-    lin_vel_x = robot_lin_vel_b[:, 0]
-  else:
-    lin_vel_cmd_x = env.command_manager.get_command(command_name)[:, 0]
-    lin_vel_x = asset.data.root_link_lin_vel_b[:, 0]
+  Mirrors the original InstinctLab ``dont_wait`` which uses
+  ``env.command_manager.get_command(command_name)[:, 0]`` directly.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  lin_vel_cmd_x = env.command_manager.get_command(command_name)[:, 0]
+  lin_vel_x = asset.data.root_link_lin_vel_b[:, 0]
 
   return (lin_vel_cmd_x > 0.3) * (
     (lin_vel_x < 0.15).float() + (lin_vel_x < 0.0).float() + (lin_vel_x < -0.15).float()
@@ -122,26 +86,18 @@ def stand_still(
   threshold: float = 0.15,
   offset: float = 1.0,
 ) -> torch.Tensor:
-  """Penalize moving when there is no velocity command."""
+  """Penalize moving when there is no velocity command.
+
+  Mirrors the original InstinctLab ``stand_still``.
+  """
   asset: Entity = env.scene[asset_cfg.name]
   default_joint_pos = asset.data.default_joint_pos
   assert default_joint_pos is not None
   dof_error = torch.sum(torch.abs(asset.data.joint_pos - default_joint_pos), dim=1)
 
-  command_term = env.command_manager.get_term(command_name)
-  if hasattr(command_term, "anchor_quat_w") and hasattr(command_term, "anchor_lin_vel_w"):
-    ref_lin_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.anchor_lin_vel_w)
-    ref_ang_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.anchor_ang_vel_w)
-    cmd_lin_norm = torch.norm(ref_lin_vel_b[:, :2], dim=1)
-    cmd_yaw_abs = torch.abs(ref_ang_vel_b[:, 2])
-  else:
-    cmd = env.command_manager.get_command(command_name)
-    if cmd.shape[1] < 3:
-      raise ValueError(
-        f"Command '{command_name}' must have at least 3 dims (vx, vy, wz), got {cmd.shape[1]}."
-      )
-    cmd_lin_norm = torch.norm(cmd[:, :2], dim=1)
-    cmd_yaw_abs = torch.abs(cmd[:, 2])
+  cmd = env.command_manager.get_command(command_name)
+  cmd_lin_norm = torch.norm(cmd[:, :2], dim=1)
+  cmd_yaw_abs = torch.abs(cmd[:, 2])
 
   return (dof_error - offset) * (cmd_lin_norm < threshold) * (cmd_yaw_abs < threshold)
 
@@ -153,7 +109,10 @@ def feet_air_time(
   sensor_cfg: SceneEntityCfg | None = None,
   sensor_name: str | None = None,
 ) -> torch.Tensor:
-  """Reward long steps taken by the feet for bipeds."""
+  """Reward long steps taken by the feet for bipeds.
+
+  Mirrors the original InstinctLab ``feet_air_time``.
+  """
   if sensor_name is None:
     if sensor_cfg is None:
       raise ValueError("Either sensor_name or sensor_cfg must be provided.")
@@ -174,22 +133,12 @@ def feet_air_time(
   single_stance = torch.sum(in_contact.int(), dim=1) == 1
   reward = torch.min(torch.where(single_stance.unsqueeze(-1), in_mode_time, 0.0), dim=1)[0]
 
-  command_term = env.command_manager.get_term(command_name)
-  if hasattr(command_term, "anchor_quat_w") and hasattr(command_term, "anchor_lin_vel_w"):
-    ref_lin_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.anchor_lin_vel_w)
-    ref_ang_vel_b = quat_apply_inverse(command_term.anchor_quat_w, command_term.anchor_ang_vel_w)
-    cmd_lin_norm = torch.norm(ref_lin_vel_b[:, :2], dim=1)
-    cmd_yaw_abs = torch.abs(ref_ang_vel_b[:, 2])
-  else:
-    cmd = env.command_manager.get_command(command_name)
-    if cmd.shape[1] < 3:
-      raise ValueError(
-        f"Command '{command_name}' must have at least 3 dims (vx, vy, wz), got {cmd.shape[1]}."
-      )
-    cmd_lin_norm = torch.norm(cmd[:, :2], dim=1)
-    cmd_yaw_abs = torch.abs(cmd[:, 2])
-
-  reward *= torch.logical_or(cmd_lin_norm > vel_threshold, cmd_yaw_abs > vel_threshold)
+  # no reward for zero command
+  cmd = env.command_manager.get_command(command_name)
+  reward *= torch.logical_or(
+    torch.norm(cmd[:, :2], dim=1) > vel_threshold,
+    torch.abs(cmd[:, 2]) > vel_threshold,
+  )
   return reward
 
 
@@ -197,19 +146,31 @@ def feet_slide(
   env: ManagerBasedRlEnv,
   sensor_name: str,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-  threshold: float = 0.1,
+  threshold: float = 1.0,
 ) -> torch.Tensor:
-  """Penalize foot sliding speed while feet are in contact."""
+  """Penalize foot sliding speed while feet are in contact.
+
+  Mirrors the original InstinctLab ``contact_slide``.
+  ``threshold`` is the contact force threshold (Newtons) — matches the
+  original semantics where ``net_forces_w_history.norm() > threshold``
+  determines contact.  In mjlab, ``sensor.data.force`` is used when
+  available; otherwise falls back to ``sensor.data.found``.
+  """
   asset: Entity = env.scene[asset_cfg.name]
   sensor: ContactSensor = env.scene[sensor_name]
-  found = sensor.data.found
-  if found is None:
-    return torch.zeros(env.num_envs, device=env.device)
 
-  if found.ndim == 3:
-    in_contact = torch.any(found > 0, dim=-1)
+  # Contact detection — mjlab adaptation of original net_forces_w_history
+  # Original: contacts = net_forces_w_history[...].norm().max(dim=1)[0] > threshold
+  if sensor.data.force is not None:
+    in_contact = torch.linalg.vector_norm(sensor.data.force, dim=-1) > threshold
+  elif sensor.data.found is not None:
+    found = sensor.data.found
+    if found.ndim == 3:
+      in_contact = torch.any(found > 0, dim=-1)
+    else:
+      in_contact = found > 0
   else:
-    in_contact = found > 0
+    return torch.zeros(env.num_envs, device=env.device)
 
   body_vel_w = getattr(asset.data, "body_link_lin_vel_w", None)
   if body_vel_w is None:
@@ -227,8 +188,9 @@ def feet_slide(
 
   foot_vel_xy = body_vel_w[:, body_ids, :2]
   slip_speed = torch.norm(foot_vel_xy, dim=-1)
-  slip_penalty = torch.clamp(slip_speed - threshold, min=0.0)
-  return torch.sum(slip_penalty * in_contact.float(), dim=1)
+  # Original: torch.sum(body_vel.norm(dim=-1) * contacts, dim=1)
+  # No slip speed threshold/clamp — penalize raw speed
+  return torch.sum(slip_speed * in_contact.float(), dim=1)
 
 
 def ang_vel_xy_l2(

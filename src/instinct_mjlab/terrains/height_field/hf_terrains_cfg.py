@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field
 from typing import List
 
 from mjlab.terrains.height_field import (
@@ -43,7 +43,7 @@ class PerlinPlaneTerrainCfg(HfTerrainBaseCfg, WallTerrainCfgMixin):
 class PerlinPyramidSlopedTerrainCfg(HfPyramidSlopedTerrainCfg, WallTerrainCfgMixin):
     function: object = hf_terrains.perlin_pyramid_sloped_terrain
 
-    slope_range: tuple[float, float] = None
+    slope_range: tuple[float, float] = MISSING
     platform_width: float = 1.0
     inverted: bool = False
     perlin_cfg: PerlinPlaneTerrainCfg | None = None
@@ -52,7 +52,7 @@ class PerlinPyramidSlopedTerrainCfg(HfPyramidSlopedTerrainCfg, WallTerrainCfgMix
 class PerlinInvertedPyramidSlopedTerrainCfg(HfInvertedPyramidSlopedTerrainCfg, WallTerrainCfgMixin):
     function: object = hf_terrains.perlin_pyramid_sloped_terrain
 
-    slope_range: tuple[float, float] = None
+    slope_range: tuple[float, float] = MISSING
     platform_width: float = 1.0
     inverted: bool = True
     perlin_cfg: PerlinPlaneTerrainCfg | None = None
@@ -61,8 +61,8 @@ class PerlinInvertedPyramidSlopedTerrainCfg(HfInvertedPyramidSlopedTerrainCfg, W
 class PerlinPyramidStairsTerrainCfg(HfPyramidStairsTerrainCfg, WallTerrainCfgMixin):
     function: object = hf_terrains.perlin_pyramid_stairs_terrain
 
-    step_height_range: tuple[float, float] = None
-    step_width: float = None
+    step_height_range: tuple[float, float] = MISSING
+    step_width: float = MISSING
     platform_width: float = 1.0
     inverted: bool = False
     perlin_cfg: PerlinPlaneTerrainCfg | None = None
@@ -71,8 +71,8 @@ class PerlinPyramidStairsTerrainCfg(HfPyramidStairsTerrainCfg, WallTerrainCfgMix
 class PerlinInvertedPyramidStairsTerrainCfg(HfInvertedPyramidStairsTerrainCfg, WallTerrainCfgMixin):
     function: object = hf_terrains.perlin_pyramid_stairs_terrain
 
-    step_height_range: tuple[float, float] = None
-    step_width: float = None
+    step_height_range: tuple[float, float] = MISSING
+    step_width: float = MISSING
     platform_width: float = 1.0
     inverted: bool = True
     perlin_cfg: PerlinPlaneTerrainCfg | None = None
@@ -82,9 +82,9 @@ class PerlinDiscreteObstaclesTerrainCfg(HfDiscreteObstaclesTerrainCfg, WallTerra
     function: object = hf_terrains.perlin_discrete_obstacles_terrain
 
     obstacle_height_mode: str = "choice"
-    obstacle_width_range: tuple[float, float] = None
-    obstacle_height_range: tuple[float, float] = None
-    num_obstacles: int = None
+    obstacle_width_range: tuple[float, float] = MISSING
+    obstacle_height_range: tuple[float, float] = MISSING
+    num_obstacles: int = MISSING
     platform_width: float = 1.0
     perlin_cfg: PerlinPlaneTerrainCfg | None = None
 
@@ -92,7 +92,7 @@ class PerlinDiscreteObstaclesTerrainCfg(HfDiscreteObstaclesTerrainCfg, WallTerra
 class PerlinWaveTerrainCfg(HfWaveTerrainCfg, WallTerrainCfgMixin):
     function: object = hf_terrains.perlin_wave_terrain
 
-    amplitude_range: tuple[float, float] = None
+    amplitude_range: tuple[float, float] = MISSING
     num_waves: int = 1
     perlin_cfg: PerlinPlaneTerrainCfg | None = None
 
@@ -100,9 +100,9 @@ class PerlinWaveTerrainCfg(HfWaveTerrainCfg, WallTerrainCfgMixin):
 class PerlinSteppingStonesTerrainCfg(HfSteppingStonesTerrainCfg, WallTerrainCfgMixin):
     function: object = hf_terrains.perlin_stepping_stones_terrain
 
-    stone_height_max: float = None
-    stone_width_range: tuple[float, float] = None
-    stone_distance_range: tuple[float, float] = None
+    stone_height_max: float = MISSING
+    stone_width_range: tuple[float, float] = MISSING
+    stone_distance_range: tuple[float, float] = MISSING
     holes_depth: float = -10.0
     platform_width: float = 1.0
     perlin_cfg: PerlinPlaneTerrainCfg | None = None
@@ -138,13 +138,13 @@ class PerlinStairsUpDownTerrainCfg(HfTerrainBaseCfg, WallTerrainCfgMixin):
 
     function: object = hf_terrains.perlin_stairs_up_down_terrain
 
-    per_step_height: tuple[float, float] | float = None
+    per_step_height: tuple[float, float] | float = MISSING
     """The height of each step. Could be a fixed value or a range (min, max)."""
     per_step_width: float | None = None
     """The width of each step. If None, it will be equal to the width of the terrain."""
-    per_step_length: tuple[float, float] | float = None
+    per_step_length: tuple[float, float] | float = MISSING
     """The length of each step along the y-axis."""
-    num_steps: tuple[int, int] | int = None
+    num_steps: tuple[int, int] | int = MISSING
     """The number of steps. Could be a fixed value or a range (min, max)."""
 
     platform_length: float = 1.0
@@ -158,13 +158,13 @@ class PerlinStairsDownUpTerrainCfg(HfTerrainBaseCfg, WallTerrainCfgMixin):
 
     function: object = hf_terrains.perlin_stairs_down_up_terrain
 
-    per_step_height: tuple[float, float] | float = None
+    per_step_height: tuple[float, float] | float = MISSING
     """The height of each step. Could be a fixed value or a range (min, max)."""
     per_step_width: float | None = None
     """The width of each step. If None, it will be equal to the width of the terrain."""
-    per_step_length: tuple[float, float] | float = None
+    per_step_length: tuple[float, float] | float = MISSING
     """The length of each step along the y-axis."""
-    num_steps: tuple[int, int] | int = None
+    num_steps: tuple[int, int] | int = MISSING
     """The number of steps. Could be a fixed value or a range (min, max)."""
 
     platform_length: float = 1.0
@@ -178,11 +178,11 @@ class PerlinTiltTerrainCfg(HfTerrainBaseCfg, WallTerrainCfgMixin):
 
     function: object = hf_terrains.perlin_tilt_terrain
 
-    wall_height: tuple[float, float] | float = None
+    wall_height: tuple[float, float] | float = MISSING
     wall_width: float | None = None
-    wall_length: tuple[float, float] | float = None
-    wall_opening_angle: tuple[float, float] | float = None  # in degrees
-    wall_opening_width: tuple[float, float] | float = None
+    wall_length: tuple[float, float] | float = MISSING
+    wall_opening_angle: tuple[float, float] | float = MISSING  # in degrees
+    wall_opening_width: tuple[float, float] | float = MISSING
     perlin_cfg: PerlinPlaneTerrainCfg | None = None
 
 @dataclass(kw_only=True)
@@ -191,11 +191,11 @@ class PerlinTiltedRampTerrainCfg(HfTerrainBaseCfg, WallTerrainCfgMixin):
 
     function: object = hf_terrains.perlin_tilted_ramp_terrain
 
-    tilt_angle: tuple[float, float] | float = None  # in degrees
-    tilt_height: tuple[float, float] | float = None
-    tilt_width: tuple[float, float] | float = None
-    tilt_length: tuple[float, float] | float = None
-    switch_spacing: tuple[float, float] | float = None
+    tilt_angle: tuple[float, float] | float = MISSING  # in degrees
+    tilt_height: tuple[float, float] | float = MISSING
+    tilt_width: tuple[float, float] | float = MISSING
+    tilt_length: tuple[float, float] | float = MISSING
+    switch_spacing: tuple[float, float] | float = MISSING
     spacing_curriculum: bool | None = None
     overlap_size: float | None = None
     perlin_cfg: PerlinPlaneTerrainCfg | None = None
@@ -206,8 +206,8 @@ class PerlinSlopeTerrainCfg(HfTerrainBaseCfg, WallTerrainCfgMixin):
 
     function: object = hf_terrains.perlin_slope_terrain
 
-    slope_angle: tuple[float, float] | float = None  # in degrees
-    per_slope_length: tuple[float, float] | float = None
+    slope_angle: tuple[float, float] | float = MISSING  # in degrees
+    per_slope_length: tuple[float, float] | float = MISSING
     platform_length: float = 1.0
     slope_width: float | None = None
     up_down: bool | None = None  # If True or None, the slope will be up and down, otherwise it will be down and up.
@@ -219,9 +219,9 @@ class PerlinCrossStoneTerrainCfg(HfTerrainBaseCfg, WallTerrainCfgMixin):
 
     function: object = hf_terrains.perlin_cross_stone_terrain
 
-    stone_size: tuple[float, float] = None
-    stone_height: tuple[float, float] | float = None
-    stone_spacing: tuple[float, float] | float = None
+    stone_size: tuple[float, float] = MISSING
+    stone_height: tuple[float, float] | float = MISSING
+    stone_spacing: tuple[float, float] | float = MISSING
     ground_depth: float = -0.5
     platform_width: float = 1.5
     xy_random_ratio: float = 0.2

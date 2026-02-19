@@ -12,7 +12,7 @@ from instinct_mjlab.motion_reference.motion_files.amass_motion import AmassMotio
 
 if TYPE_CHECKING:
     from .terrain_motion_cfg import TerrainMotionCfg
-    from mjlab.scene import Scene as InteractiveScene
+    from mjlab.scene import Scene
 
 
 class TerrainMotion(AmassMotion):
@@ -60,7 +60,7 @@ class TerrainMotion(AmassMotion):
             torch.ones(len(self._all_motion_files), dtype=torch.int, device=self.output_device) * torch.nan
         )  # type: ignore
 
-    def match_scene(self, scene: InteractiveScene) -> None:
+    def match_scene(self, scene: Scene) -> None:
         terrain = scene.terrain
         subterrain_specific_cfgs = scene.terrain.subterrain_specific_cfgs
         terrain_id_to_origins = {t["terrain_id"]: [] for t in self.yaml_data["terrains"]}

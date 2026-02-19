@@ -25,8 +25,8 @@ from instinct_mjlab.assets.unitree_g1 import (
     G1_29Dof_TorsoBase_symmetric_augmentation_joint_reverse_buf,
     G1_MJCF_PATH,
     beyondmimic_action_scale,
-    beyondmimic_g1_29dof_actuators,
-    beyondmimic_g1_29dof_delayed_actuators,
+    beyondmimic_g1_29dof_actuator_cfgs,
+    beyondmimic_g1_29dof_delayed_actuator_cfgs,
 )
 from instinct_mjlab.monitors import ActuatorMonitorTerm, MonitorTermCfg, ShadowingBasePosMonitorTerm
 from instinct_mjlab.motion_reference import MotionReferenceManagerCfg
@@ -34,7 +34,7 @@ from instinct_mjlab.motion_reference.motion_files.aistpp_motion_cfg import Aistp
 from instinct_mjlab.motion_reference.motion_files.amass_motion_cfg import AmassMotionCfg as AmassMotionCfgBase
 from instinct_mjlab.motion_reference.motion_files.terrain_motion_cfg import TerrainMotionCfg as TerrainMotionCfgBase
 from instinct_mjlab.motion_reference.utils import motion_interpolate_bilinear
-from instinct_mjlab.utils.datasets import resolve_datasets_root
+from instinct_mjlab.utils.motion_validation import resolve_datasets_root
 
 G1_CFG = G1_29DOF_TORSOBASE_POPSICLE_CFG
 PROPRIO_HISTORY_LENGTH = 8
@@ -72,9 +72,8 @@ class TerrainMotionCfg(TerrainMotionCfgBase):
 
 
 motion_reference_cfg = MotionReferenceManagerCfg(
-    prim_path="{ENV_REGEX_NS}/Robot/torso_link",
+    entity_name="robot",
     robot_model_path=G1_MJCF_PATH,
-    reference_prim_path="/World/envs/env_.*/RobotReference/torso_link",
     link_of_interests=[
         "pelvis",
         "torso_link",
@@ -112,7 +111,7 @@ motion_reference_cfg = MotionReferenceManagerCfg(
 
 def _make_motion_reference_cfg(*, debug_vis: bool = False) -> MotionReferenceManagerCfg:
     cfg = deepcopy(motion_reference_cfg)
-    cfg.debug_vis = debug_vis
+    cfg.reference_entity_name = "robot_reference" if debug_vis else None
     return cfg
 
 
@@ -220,7 +219,7 @@ def make_vae_observations() -> dict[str, ObsGroupCfg]:
 class G1PerceptiveVaeEnvCfg(perceptual_cfg.PerceptiveShadowingEnvCfg):
     scene: perceptual_cfg.PerceptiveShadowingSceneCfg = field(default_factory=lambda: perceptual_cfg.PerceptiveShadowingSceneCfg(
         num_envs=4096,
-        robot=G1_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot"),
+        robot=deepcopy(G1_CFG),
         motion_reference=_make_motion_reference_cfg(debug_vis=False),
         height_scanner=None,
     ))
@@ -233,7 +232,7 @@ class G1PerceptiveVaeEnvCfg(perceptual_cfg.PerceptiveShadowingEnvCfg):
 
         self.scene.camera.data_histories["distance_to_image_plane_noised"] = 10
         self.observations["policy"].terms["depth_image"].params["history_skip_frames"] = 3
-        self.scene.robot.actuators = beyondmimic_g1_29dof_actuators
+        self.scene.robot.articulation.actuators = beyondmimic_g1_29dof_actuator_cfgs
         self.actions["joint_pos"].scale = beyondmimic_action_scale
 
         motion_buffer = list(self.scene.motion_reference.motion_buffers.values())[0]
@@ -252,8 +251,8 @@ class G1PerceptiveVaeEnvCfg_PLAY(G1PerceptiveVaeEnvCfg):
     scene: perceptual_cfg.PerceptiveShadowingSceneCfg = field(default_factory=lambda: perceptual_cfg.PerceptiveShadowingSceneCfg(
         num_envs=1,
         env_spacing=2.5,
-        robot=G1_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot"),
-        robot_reference=G1_CFG.replace(prim_path="{ENV_REGEX_NS}/RobotReference"),
+        robot=deepcopy(G1_CFG),
+        robot_reference=deepcopy(G1_CFG),
         motion_reference=_make_motion_reference_cfg(debug_vis=True),
     ))
 

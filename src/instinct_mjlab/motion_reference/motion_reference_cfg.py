@@ -31,16 +31,10 @@ class MotionReferenceManagerCfg(SensorBaseCfg):
         """Build sensor instance from this config (mjlab SensorCfg interface)."""
         return self.class_type(self)
 
-    # Isaac Lab SensorCfg had prim_path; mjlab SensorCfg does not.
-    prim_path: str = ""
-    """Prim path (Isaac Lab compatibility). Used to identify the sensor target entity."""
-
-    # mjlab SensorCfg requires name; provide default for Isaac Lab compat.
     name: str = "motion_reference"
 
-    # Isaac Lab SensorCfg had debug_vis; mjlab SensorCfg does not.
-    debug_vis: bool = False
-    """Whether to enable debug visualization for the motion reference."""
+    entity_name: str = "robot"
+    """Entity name of the robot to track (key in scene.entities)."""
 
     data_class_type: type = MotionReferenceData
     """ The class type of the motion reference data. Use this config to override the default motion reference data class. """
@@ -114,11 +108,11 @@ class MotionReferenceManagerCfg(SensorBaseCfg):
     """ link mapping is in the order of `link_of_interests` """
 
     ### visualizations ###
-    reference_prim_path: str | None = None
-    """ The prim path to the reference robot.
+    reference_entity_name: str | None = None
+    """ The entity name of the reference robot in scene.entities.
         To activate the robot model visualization, please spawn another articulation with no
         collisions with any other objects in the scene (but can be visualized in the viewer).
-        Then provide the prim path of that reference articulation.
+        Then provide the entity name of that reference articulation.
         If None, the reference robot is not visualized.
     """
 

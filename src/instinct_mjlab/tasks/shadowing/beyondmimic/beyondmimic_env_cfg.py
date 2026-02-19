@@ -9,7 +9,7 @@ from mjlab.managers import RewardTermCfg as RewTermCfg
 from mjlab.managers import SceneEntityCfg
 from mjlab.managers import TerminationTermCfg as DoneTermCfg
 from mjlab.scene import SceneCfg as InteractiveSceneCfg
-from mjlab.sensors import ContactMatch, ContactSensorCfg
+from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg
 
@@ -25,6 +25,35 @@ from instinct_mjlab.monitors import (
     ShadowingRotationMonitorTerm,
 )
 from instinct_mjlab.motion_reference import MotionReferenceManagerCfg
+
+_UNDESIRED_CONTACT_BODY_NAMES = (
+    "pelvis",
+    "left_hip_pitch_link",
+    "left_hip_roll_link",
+    "left_hip_yaw_link",
+    "left_knee_link",
+    "left_ankle_pitch_link",
+    "right_hip_pitch_link",
+    "right_hip_roll_link",
+    "right_hip_yaw_link",
+    "right_knee_link",
+    "right_ankle_pitch_link",
+    "waist_yaw_link",
+    "waist_roll_link",
+    "torso_link",
+    "left_shoulder_pitch_link",
+    "left_shoulder_roll_link",
+    "left_shoulder_yaw_link",
+    "left_elbow_link",
+    "left_wrist_roll_link",
+    "left_wrist_pitch_link",
+    "right_shoulder_pitch_link",
+    "right_shoulder_roll_link",
+    "right_shoulder_yaw_link",
+    "right_elbow_link",
+    "right_wrist_roll_link",
+    "right_wrist_pitch_link",
+)
 
 
 @dataclass(kw_only=True)
@@ -62,14 +91,18 @@ class BeyondMimicSceneCfg(InteractiveSceneCfg):
         spawn=None,
     ))
 
-    contact_forces: object = field(default_factory=lambda: ContactSensorCfg(
-        name="contact_forces",
-        primary=ContactMatch(mode="body", pattern=".*", entity="robot"),
+    undesired_contact_forces: object = field(default_factory=lambda: ContactSensorCfg(
+        name="undesired_contact_forces",
+        primary=ContactMatch(
+            mode="body",
+            pattern=_UNDESIRED_CONTACT_BODY_NAMES,
+            entity="robot",
+        ),
         secondary=ContactMatch(mode="body", pattern="terrain"),
         fields=("found", "force"),
-        reduce="maxforce",
+        reduce="netforce",
         history_length=3,
-        track_air_time=True,
+        num_slots=1,
     ))
 
     def __post_init__(self):
@@ -78,10 +111,15 @@ class BeyondMimicSceneCfg(InteractiveSceneCfg):
             self.entities["robot"] = self.robot
         if self.robot_reference is not None:
             self.entities["robot_reference"] = self.robot_reference
-        if self.contact_forces is not None:
-            self.sensors = (self.contact_forces,)
+        sensor_list = []
+        if self.undesired_contact_forces is not None:
+            sensor_list.append(self.undesired_contact_forces)
+        if self.motion_reference is not None:
+            sensor_list.append(self.motion_reference)
+        if sensor_list:
+            self.sensors = tuple(sensor_list)
 
-        if self.motion_reference is None or not self.motion_reference.debug_vis:
+        if self.motion_reference is None or self.motion_reference.reference_entity_name is None:
             if "robot_reference" in self.entities:
                 del self.entities["robot_reference"]
             if hasattr(self, "robot_reference"):
@@ -283,12 +321,7 @@ def make_beyondmimic_rewards() -> dict[str, RewTermCfg | None]:
             func=instinct_mdp.undesired_contacts,
             weight=-0.1,
             params={
-                "sensor_cfg": SceneEntityCfg(
-                    "contact_forces",
-                    body_names=[
-                        r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_yaw_link$)(?!right_wrist_yaw_link$).+$"
-                    ],
-                ),
+                "sensor_name": "undesired_contact_forces",
                 "threshold": 1.0,
             },
         ),
@@ -543,8 +576,15 @@ class BeyondMimicEnvCfg(InstinctLabRLEnvCfg):
         # general settings
         self.decimation = 4
         self.episode_length_s = 10.0
-        # simulation settings
+        # simulation settings — constrain collision buffers to avoid GPU OOM
+        # BeyondMimic monitors many body-ground contacts, so nconmax needs to be
+        # larger than tracking (35) but bounded to prevent mujoco_warp from
+        # auto-allocating enormous EPA buffers.
+        self.sim.nconmax = 100
+        self.sim.njmax = 300
         self.sim.mujoco.timestep = 1.0 / 50.0 / self.decimation
+        # Keep CCD iterations moderate to avoid large EPA buffers at 4096 envs.
+        self.sim.mujoco.ccd_iterations = 80
 
         # All managers are already dicts, no conversion needed!
         self.run_name = "BeyondMimic"
