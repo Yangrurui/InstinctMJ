@@ -228,7 +228,7 @@ class FiledTerrainGenerator(TerrainGenerator):
         sub_terrain_cfg: SubTerrainBaseCfg,
         sub_row: int,
         sub_col: int,
-    ) -> None:
+    ):
         """Add native hfield collision for terrain mesh surface."""
         from instinct_mjlab.terrains.trimesh.mesh_terrains import _add_collision_hfield_from_mesh
 
@@ -239,11 +239,18 @@ class FiledTerrainGenerator(TerrainGenerator):
             resolution = 0.05
         resolution = float(resolution)
         wall_thickness = float(getattr(sub_terrain_cfg, "wall_thickness", 0.0) or 0.0)
-        # Keep seam stitching minimal: only flatten a very thin outer ring so
-        # neighboring tiles stay edge-aligned without introducing wide flat gaps
-        # between different terrain types.
-        if wall_thickness > 0.0:
-            stitch_border_pixels = max(int(np.ceil(wall_thickness / resolution)), 1)
+        cfg_border_width = float(getattr(sub_terrain_cfg, "border_width", 0.0) or 0.0)
+        global_stitch_border_width = float(getattr(self.cfg, "hfield_stitch_border_width", 0.0) or 0.0)
+        # Keep terrain seams height-aligned over the intended flat border zone.
+        # Use the widest available border hint so every sub-terrain has a
+        # consistently flat outer ring before tile stitching.
+        stitch_border_width = max(wall_thickness, cfg_border_width, global_stitch_border_width)
+        if stitch_border_width > 0.0:
+            # Match IsaacLab/InstinctLab border discretization semantics used by
+            # `height_field_to_mesh`: `int(width / scale) + 1`.
+            # This avoids a one-pixel under-coverage when width is an exact
+            # multiple of the resolution (for example 1.5m / 0.05m).
+            stitch_border_pixels = max(int(stitch_border_width / resolution) + 1, 1)
         else:
             stitch_border_pixels = 1
         # Keep InstinctLab-equivalent terrain tiling semantics:
@@ -281,6 +288,7 @@ class FiledTerrainGenerator(TerrainGenerator):
             hfield_geometry.geom.rgba[3] = 1.0
         else:
             hfield_geometry.geom.rgba[:] = (0.5, 0.5, 0.5, 1.0)
+        return hfield_geometry
 
     @staticmethod
     def _estimate_mesh_border_height(
@@ -426,6 +434,111 @@ class FiledTerrainGenerator(TerrainGenerator):
             terrain_function = terrain_function.__func__
         return terrain_function
 
+    @staticmethod
+    def _hfield_spec_to_world_mesh(
+        hfield_spec,
+        geom_pos: np.ndarray,
+    ) -> trimesh.Trimesh | None:
+        """Convert a MuJoCo hfield spec + geom pose into a world-frame trimesh."""
+        nrow = int(getattr(hfield_spec, "nrow", 0))
+        ncol = int(getattr(hfield_spec, "ncol", 0))
+        if nrow <= 1 or ncol <= 1:
+            return None
+
+        userdata = np.asarray(getattr(hfield_spec, "userdata", []), dtype=np.float64)
+        if userdata.size != nrow * ncol:
+            return None
+        normalized_heights = userdata.reshape(nrow, ncol)
+
+        size = np.asarray(getattr(hfield_spec, "size", []), dtype=np.float64).reshape(-1)
+        if size.size < 4:
+            return None
+        half_x, half_y, elevation_range, base_thickness = size[:4]
+
+        xs = np.linspace(-half_x, half_x, nrow, dtype=np.float64)
+        ys = np.linspace(-half_y, half_y, ncol, dtype=np.float64)
+        xx, yy = np.meshgrid(xs, ys, indexing="ij")
+        zz = base_thickness + normalized_heights * elevation_range
+
+        vertices = np.stack([xx, yy, zz], axis=-1).reshape(-1, 3)
+        vertices += np.asarray(geom_pos, dtype=np.float64).reshape(1, 3)
+
+        faces = np.empty((2 * (nrow - 1) * (ncol - 1), 3), dtype=np.int32)
+        cursor = 0
+        for row in range(nrow - 1):
+            base = row * ncol
+            for col in range(ncol - 1):
+                ind0 = base + col
+                ind1 = ind0 + 1
+                ind2 = ind0 + ncol
+                ind3 = ind2 + 1
+                faces[cursor] = (ind0, ind3, ind1)
+                faces[cursor + 1] = (ind0, ind2, ind3)
+                cursor += 2
+
+        return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+
+    @staticmethod
+    def _sample_hfield_height_at_local_xy(
+        hfield_geometry,
+        local_x: float,
+        local_y: float,
+        terrain_size: tuple[float, float],
+    ) -> float | None:
+        """Sample world-space hfield surface height at local sub-terrain XY."""
+        if hfield_geometry is None:
+            return None
+
+        geom = getattr(hfield_geometry, "geom", None)
+        hfield = getattr(hfield_geometry, "hfield", None)
+        if geom is None or hfield is None:
+            return None
+
+        nrow = int(getattr(hfield, "nrow", 0))
+        ncol = int(getattr(hfield, "ncol", 0))
+        if nrow <= 1 or ncol <= 1:
+            return None
+
+        userdata = np.asarray(getattr(hfield, "userdata", []), dtype=np.float64)
+        if userdata.size != nrow * ncol:
+            return None
+        normalized_height = userdata.reshape(nrow, ncol)
+
+        hfield_size = np.asarray(getattr(hfield, "size", []), dtype=np.float64).reshape(-1)
+        if hfield_size.size < 4:
+            return None
+        elevation_range = float(hfield_size[2])
+        base_thickness = float(hfield_size[3])
+
+        geom_pos = np.asarray(getattr(geom, "pos", []), dtype=np.float64).reshape(-1)
+        if geom_pos.size < 3:
+            return None
+        geom_z = float(geom_pos[2])
+
+        size_x = max(float(terrain_size[0]), 1.0e-9)
+        size_y = max(float(terrain_size[1]), 1.0e-9)
+        x = float(np.clip(local_x, 0.0, size_x))
+        y = float(np.clip(local_y, 0.0, size_y))
+        x_idx = x / size_x * (nrow - 1)
+        y_idx = y / size_y * (ncol - 1)
+
+        x0 = int(np.floor(x_idx))
+        y0 = int(np.floor(y_idx))
+        x1 = min(x0 + 1, nrow - 1)
+        y1 = min(y0 + 1, ncol - 1)
+        tx = x_idx - x0
+        ty = y_idx - y0
+
+        n00 = normalized_height[x0, y0]
+        n01 = normalized_height[x0, y1]
+        n10 = normalized_height[x1, y0]
+        n11 = normalized_height[x1, y1]
+        n_top = (1.0 - ty) * n00 + ty * n01
+        n_bottom = (1.0 - ty) * n10 + ty * n11
+        n_interp = (1.0 - tx) * n_top + tx * n_bottom
+
+        return geom_z + base_thickness + float(n_interp) * elevation_range
+
     def _create_two_arg_terrain_geom(
         self,
         spec: mujoco.MjSpec,
@@ -459,6 +572,7 @@ class FiledTerrainGenerator(TerrainGenerator):
         if len(compiled_meshes) == 0:
             raise RuntimeError("Two-arg terrain function returned an empty mesh list.")
         collision_mode = self._get_legacy_two_arg_collision_mode()
+        hfield_geometry = None
         if collision_mode == "hfield":
             for mesh, is_wall_like in local_meshes:
                 if is_wall_like:
@@ -471,7 +585,7 @@ class FiledTerrainGenerator(TerrainGenerator):
             else:
                 collision_surface_mesh = trimesh.util.concatenate(compiled_meshes)
 
-            self._add_hfield_collision_from_surface_mesh(
+            hfield_geometry = self._add_hfield_collision_from_surface_mesh(
                 spec=spec,
                 world_position=world_position,
                 surface_mesh_local=collision_surface_mesh,
@@ -494,6 +608,16 @@ class FiledTerrainGenerator(TerrainGenerator):
                 collision_surface_mesh = trimesh.util.concatenate(compiled_meshes)
 
         spawn_origin = np.asarray(origin, dtype=np.float64) + world_position
+        if collision_mode == "hfield":
+            sampled_spawn_z = self._sample_hfield_height_at_local_xy(
+                hfield_geometry,
+                local_x=float(origin[0]),
+                local_y=float(origin[1]),
+                terrain_size=(float(sub_terrain_cfg.size[0]), float(sub_terrain_cfg.size[1])),
+            )
+            if sampled_spawn_z is not None:
+                spawn_origin[2] = sampled_spawn_z
+
         for _, arr in self.flat_patches.items():
             # Keep fallback behavior from mjlab TerrainGenerator: every slot has a valid reset location.
             arr[sub_row, sub_col] = spawn_origin
@@ -550,41 +674,49 @@ class FiledTerrainGenerator(TerrainGenerator):
         """
         terrain_function = self._get_subterrain_function(cfg)
         num_args = len(inspect.signature(terrain_function).parameters)
-        if num_args == 2:
-            meshes, origin = terrain_function(difficulty, cfg)
-            spawn_origin = self._create_two_arg_terrain_geom(
-                spec, world_position, meshes, origin, cfg, sub_row, sub_col
-            )
-        elif num_args == 4:
-            # Record mesh names before calling super so we can identify newly-added mesh geoms.
-            mesh_names_before = {m.name for m in spec.meshes}
-            spawn_origin = super()._create_terrain_geom(
-                spec,
-                world_position,
-                difficulty,
-                cfg,
-                sub_row,
-                sub_col,
-            )
-            # Collect world-frame mesh for virtual obstacle generation (mirrors two-arg mesh path).
-            new_mesh_names = {m.name for m in spec.meshes} - mesh_names_before
-            for geom in spec.body("terrain").geoms:
-                mesh_name = getattr(geom, "meshname", "")
-                if not isinstance(mesh_name, str) or mesh_name not in new_mesh_names:
-                    continue
-                mjs_mesh = spec.mesh(mesh_name)
-                if mjs_mesh is None:
-                    continue
-                verts = np.array(mjs_mesh.uservert, dtype=np.float32).reshape(-1, 3)
-                faces = np.array(mjs_mesh.userface, dtype=np.int32).reshape(-1, 3)
-                geom_pos = np.array(geom.pos, dtype=np.float64)
-                world_mesh = trimesh.Trimesh(vertices=verts + geom_pos, faces=faces, process=False)
-                self._terrain_meshes.append(world_mesh)
-        else:
+        if num_args != 4:
             raise TypeError(
                 f"Unsupported terrain function signature for {type(cfg).__name__}: "
-                f"expected 2 (instinctlab-style mesh) or 4 (mjlab) arguments, got {num_args}."
+                f"expected mjlab-style 4 arguments `(self, difficulty, spec, rng)`, got {num_args}."
             )
+        # Record mesh names before calling super so we can identify newly-added mesh geoms.
+        mesh_names_before = {m.name for m in spec.meshes}
+        hfield_names_before = {h.name for h in spec.hfields}
+        spawn_origin = super()._create_terrain_geom(
+            spec,
+            world_position,
+            difficulty,
+            cfg,
+            sub_row,
+            sub_col,
+        )
+        # Collect world-frame mesh for virtual obstacle generation.
+        new_mesh_names = {m.name for m in spec.meshes} - mesh_names_before
+        new_hfield_names = {h.name for h in spec.hfields} - hfield_names_before
+        for geom in spec.body("terrain").geoms:
+            mesh_name = getattr(geom, "meshname", "")
+            if not isinstance(mesh_name, str) or mesh_name not in new_mesh_names:
+                hfield_name = getattr(geom, "hfieldname", "")
+                if not isinstance(hfield_name, str) or hfield_name not in new_hfield_names:
+                    continue
+                mjs_hfield = spec.hfield(hfield_name)
+                if mjs_hfield is None:
+                    continue
+                hfield_world_mesh = self._hfield_spec_to_world_mesh(
+                    mjs_hfield,
+                    geom_pos=np.asarray(geom.pos, dtype=np.float64),
+                )
+                if hfield_world_mesh is not None:
+                    self._terrain_meshes.append(hfield_world_mesh)
+                continue
+            mjs_mesh = spec.mesh(mesh_name)
+            if mjs_mesh is None:
+                continue
+            verts = np.array(mjs_mesh.uservert, dtype=np.float32).reshape(-1, 3)
+            faces = np.array(mjs_mesh.userface, dtype=np.int32).reshape(-1, 3)
+            geom_pos = np.array(geom.pos, dtype=np.float64)
+            world_mesh = trimesh.Trimesh(vertices=verts + geom_pos, faces=faces, process=False)
+            self._terrain_meshes.append(world_mesh)
         # >>> NOTE: This code snippet is copied from the super implementation because they copied the cfg
         # but we need to store the modified cfg for each subterrain.
         cfg = copy.deepcopy(cfg)

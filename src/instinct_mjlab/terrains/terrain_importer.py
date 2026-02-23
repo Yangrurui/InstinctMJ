@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import copy
 import numpy as np
 import torch
 import trimesh
 import time
 from typing import TYPE_CHECKING
 
+import mujoco
 from mjlab.terrains import SubTerrainCfg as SubTerrainBaseCfg
 from mjlab.terrains import TerrainGenerator
 from mjlab.terrains import TerrainImporter as TerrainImporterBase
@@ -34,6 +36,11 @@ if TYPE_CHECKING:
 
 class TerrainImporter(TerrainImporterBase):
     def __init__(self, cfg: TerrainImporterCfg, device: str):
+        runtime_terrain_type = cfg.terrain_type
+        if runtime_terrain_type == "hacked_generator":
+            # Keep the public name for compatibility, but route to mjlab native generator pipeline.
+            runtime_terrain_type = "generator"
+
         self._debug_vis_enabled = False
         self._collision_debug_vis = bool(getattr(cfg, "collision_debug_vis", False))
         self._collision_debug_rgba = tuple(getattr(cfg, "collision_debug_rgba", (0.62, 0.2, 0.9, 0.35)))
@@ -44,22 +51,60 @@ class TerrainImporter(TerrainImporterBase):
             virtual_obstacle = virtual_obstacle_cfg.class_type(virtual_obstacle_cfg)
             self._virtual_obstacles[name] = virtual_obstacle
 
-        if cfg.terrain_type in ("hacked_generator", "generator"):
-            self._hacked_terrain_type = "hacked_generator"
-            cfg.terrain_type = "plane"
-        super().__init__(cfg, device)
+        # Build a runtime cfg that keeps all fields but maps hacked_generator -> generator.
+        cfg_runtime = copy.deepcopy(cfg)
+        cfg_runtime.terrain_type = runtime_terrain_type
 
-        # Keep flat-patch buffers aligned with generated terrain when hacked_generator is used.
-        if getattr(self, "_hacked_terrain_type", None) == "hacked_generator" and self.terrain_generator is not None:
+        # -----------------------------------------------------------------------------
+        # mjlab-native terrain importer flow (mirrors mjlab.terrains.TerrainImporter)
+        # -----------------------------------------------------------------------------
+        self.cfg = cfg_runtime
+        self.device = device
+        self._spec = mujoco.MjSpec()
+        self.env_origins = None
+        self.terrain_origins = None
+        self.terrain_generator = None
+
+        if self.cfg.terrain_type == "generator":
+            if self.cfg.terrain_generator is None:
+                raise ValueError(
+                    "Input terrain type is 'generator' but no value provided for 'terrain_generator'."
+                )
+            terrain_generator_cls = getattr(
+                self.cfg.terrain_generator,
+                "class_type",
+                TerrainGenerator,
+            )
+            self.terrain_generator = terrain_generator_cls(
+                self.cfg.terrain_generator,
+                device=self.device,
+            )
+            self.terrain_generator.compile(self._spec)
+            self.configure_env_origins(self.terrain_generator.terrain_origins)
             self._flat_patches = {
                 name: torch.from_numpy(arr).to(device=self.device, dtype=torch.float)
                 for name, arr in self.terrain_generator.flat_patches.items()
             }
             self._flat_patch_radii = dict(self.terrain_generator.flat_patch_radii)
+        elif self.cfg.terrain_type == "plane":
+            self.import_ground_plane("terrain")
+            self.configure_env_origins()
+            self._flat_patches = {}
+            self._flat_patch_radii = {}
+        else:
+            raise ValueError(f"Unknown terrain type: {self.cfg.terrain_type}")
+
+        self._add_env_origin_sites()
+        self._add_terrain_origin_sites()
+        self._add_flat_patch_sites()
 
         terrain_mesh = self._get_terrain_mesh_for_virtual_obstacles()
         if terrain_mesh is not None:
             self._generate_virtual_obstacles(terrain_mesh)
+        elif len(self._virtual_obstacles) > 0:
+            raise RuntimeError(
+                "virtual obstacles are configured but no terrain mesh is available from terrain generator."
+            )
         if self._collision_debug_vis:
             self._apply_collision_debug_visual_style()
 
@@ -86,34 +131,8 @@ class TerrainImporter(TerrainImporterBase):
     """
 
     def import_ground_plane(self, name: str):
-        """
-        NOTE:
-        This is a hack to fit self-defined tasks and keep InstinctLab's control flow.
-        For hacked_generator, terrain_type is routed through "plane" branch while still
-        compiling custom generated terrain meshes.
-        """
-        if getattr(self, "_hacked_terrain_type", None) == "hacked_generator":
-            if self.cfg.terrain_generator is None:
-                raise ValueError("Input terrain type is 'hacked_generator' but no value provided for 'terrain_generator'.")
-            terrain_generator_cls = getattr(
-                self.cfg.terrain_generator,
-                "class_type",
-                TerrainGenerator,
-            )
-            self.terrain_generator = terrain_generator_cls(
-                self.cfg.terrain_generator,
-                device=self.device,
-            )
-            self.terrain_generator.compile(self._spec)
-            # Diagnostic: log terrain mesh geom count for debugging.
-            terrain_body = self._spec.body("terrain")
-            geom_count = sum(1 for _ in terrain_body.geoms)
-            print(f"[TerrainImporter] hacked_generator compiled: {geom_count} geom(s) in 'terrain' body")
-            if self.terrain_generator.terrain_origins is not None:
-                print(f"[TerrainImporter] terrain_origins shape: {self.terrain_generator.terrain_origins.shape}")
-            self.configure_env_origins(self.terrain_generator.terrain_origins)
-        else:
-            super().import_ground_plane(name)
+        """Import ground plane via mjlab base implementation."""
+        return super().import_ground_plane(name)
 
     def _get_terrain_mesh_for_virtual_obstacles(self) -> trimesh.Trimesh | None:
         if self.terrain_generator is None:
@@ -175,7 +194,4 @@ class TerrainImporter(TerrainImporterBase):
         Args:
             origins: The origins of the environments. Shape is (num_envs, 3).
         """
-        if origins is None and getattr(self, "_hacked_terrain_type", None) == "hacked_generator":
-            # Keep terrain-based origins configured in hacked_generator path.
-            return
         return super().configure_env_origins(origins)

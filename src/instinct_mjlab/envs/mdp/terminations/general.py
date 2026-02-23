@@ -59,7 +59,7 @@ def terrain_out_of_bounds(
         return torch.zeros(
             (env.num_envs,), device=env.device, dtype=torch.bool
         )  # we have infinite terrain because it is a plane
-    elif terrain_type == "generator":
+    elif terrain_type in ("generator", "hacked_generator"):
         # obtain the size of the sub-terrains
         terrain_gen_cfg = env.scene.terrain.cfg.terrain_generator
         grid_width, grid_length = terrain_gen_cfg.size
@@ -80,7 +80,10 @@ def terrain_out_of_bounds(
             print(f"The base is out of the terrain border:", return_.sum())
         return return_
     else:
-        raise ValueError("Received unsupported terrain type, must be either 'plane' or 'generator'.")
+        raise ValueError(
+            "Received unsupported terrain type, must be one of: "
+            "'plane', 'generator', 'hacked_generator'."
+        )
 
 
 def abnormal_lin_vel(

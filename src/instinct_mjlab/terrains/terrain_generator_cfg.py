@@ -46,3 +46,10 @@ class FiledTerrainGeneratorCfg(TerrainGeneratorCfgBase):
 
     hfield_gpu_batch_size: int = 262144
     """Ray batch size for GPU ray-casting. Increase for throughput, decrease for lower memory."""
+
+    hfield_stitch_border_width: float = 0.0
+    """Extra stitched flat border width (meters) applied to every sub-terrain edge.
+
+    This is useful when different terrain types should share a consistently flat
+    outer ring so neighboring tiles are height-aligned at seams.
+    """

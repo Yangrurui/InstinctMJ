@@ -23,9 +23,10 @@ def sub_terrain_out_of_bounds(
   If the actor moves too close to the edge of the sub terrain, the termination is activated. The distance
   to the edge of the sub terrain is calculated based on the size of the sub terrain and the distance buffer.
   """
-  if env.cfg.scene.terrain.terrain_type == "plane":
+  terrain_type = env.cfg.scene.terrain.terrain_type
+  if terrain_type == "plane":
     return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-  elif env.cfg.scene.terrain.terrain_type == "generator":
+  elif terrain_type in ("generator", "hacked_generator"):
     # obtain the size of the sub-terrains
     terrain_gen_cfg = env.scene.terrain.cfg.terrain_generator
     grid_width, grid_length = terrain_gen_cfg.size
@@ -44,7 +45,10 @@ def sub_terrain_out_of_bounds(
     )
     return torch.logical_or(x_out_of_bounds, y_out_of_bounds)
   else:
-    raise ValueError("Received unsupported terrain type, must be either 'plane' or 'generator'.")
+    raise ValueError(
+      "Received unsupported terrain type, must be one of: "
+      "'plane', 'generator', 'hacked_generator'."
+    )
 
 
 def root_height_below_env_origin_minimum(

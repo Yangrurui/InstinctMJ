@@ -71,9 +71,6 @@ from instinct_mjlab.terrains.height_field.hf_terrains_cfg import (
 )
 from instinct_mjlab.terrains.terrain_generator_cfg import FiledTerrainGeneratorCfg
 from instinct_mjlab.terrains.terrain_importer_cfg import TerrainImporterCfg
-from instinct_mjlab.terrains.trimesh.mesh_terrains_cfg import (
-  PerlinMeshRandomMultiBoxTerrainCfg,
-)
 from instinct_mjlab.terrains.virtual_obstacle.edge_cylinder_cfg import (
   GreedyconcatEdgeCylinderCfg,
 )
@@ -89,7 +86,7 @@ _PARKOUR_DEPTH_HISTORY_LENGTH = 37
 _PARKOUR_DEPTH_SKIP_FRAMES = 5
 _PARKOUR_DEPTH_OUTPUT_FRAMES = 8
 _PARKOUR_DEPTH_DELAYED_FRAME_RANGES = (0, 1)
-_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH = 0.05
+_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH = 1.0
 _BASE_VELOCITY_COMMAND_NAME = "base_velocity"
 _FEET_CONTACT_SENSOR_NAME = "contact_forces"
 _TORSO_CONTACT_SENSOR_NAME = "torso_contact_forces"
@@ -159,20 +156,13 @@ _PARKOUR_BASE_VELOCITY_RANGES = {
 ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
   seed=0,
   size=(8.0, 8.0),
-  border_width=3.0,
+  border_width=0.0,
   num_rows=10,
   num_cols=20,
   horizontal_scale=0.05,
   vertical_scale=0.005,
   slope_threshold=1.0,
   use_cache=False,
-  legacy_two_arg_collision_mode="hfield",
-  hfield_resolution=0.10,
-  hfield_base_thickness_ratio=1.0,
-  hfield_num_workers=0,
-  hfield_raycast_backend="gpu",
-  hfield_gpu_device="cuda:0",
-  hfield_gpu_batch_size=262144,
   curriculum=True,
   add_lights=True,
   sub_terrains={
@@ -185,7 +175,7 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
       fractal_gain=0.25,
       centering=True,
       border_width=_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH,
-      wall_prob=[0.3, 0.3, 0.3, 0.3],
+      wall_prob=[0.0, 0.0, 0.0, 0.0],
       wall_height=5.0,
       wall_thickness=0.05,
       flat_patch_sampling={
@@ -203,7 +193,7 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
       fractal_gain=0.25,
       centering=True,
       border_width=_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH,
-      wall_prob=[0.3, 0.3, 0.3, 0.3],
+      wall_prob=[0.0, 0.0, 0.0, 0.0],
       wall_height=5.0,
       wall_thickness=0.05,
       flat_patch_sampling={
@@ -217,8 +207,8 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
       gap_distance_range=(0.1, 0.7),
       gap_depth=(0.4, 0.6),
       platform_width=2.5,
-      border_width=1.0,
-      wall_prob=[0.3, 0.3, 0.3, 0.3],
+      border_width=_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH,
+      wall_prob=[0.0, 0.0, 0.0, 0.0],
       wall_height=5.0,
       wall_thickness=0.05,
       flat_patch_sampling={
@@ -236,8 +226,8 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
       step_height_range=(0.05, 0.23),
       step_width=0.3,
       platform_width=2.5,
-      border_width=1.0,
-      wall_prob=[0.3, 0.3, 0.3, 0.3],
+      border_width=_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH,
+      wall_prob=[0.0, 0.0, 0.0, 0.0],
       wall_height=5.0,
       wall_thickness=0.05,
       perlin_cfg=PerlinPlaneTerrainCfg(
@@ -263,8 +253,8 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
       step_height_range=(0.05, 0.45),
       step_width=1.5,
       platform_width=4.0,
-      border_width=1.0,
-      wall_prob=[0.3, 0.3, 0.3, 0.3],
+      border_width=_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH,
+      wall_prob=[0.0, 0.0, 0.0, 0.0],
       wall_height=5.0,
       wall_thickness=0.05,
       perlin_cfg=PerlinPlaneTerrainCfg(
@@ -290,8 +280,8 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
       step_height_range=(0.05, 0.23),
       step_width=0.3,
       platform_width=2.5,
-      border_width=1.0,
-      wall_prob=[0.3, 0.3, 0.3, 0.3],
+      border_width=_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH,
+      wall_prob=[0.0, 0.0, 0.0, 0.0],
       wall_height=5.0,
       wall_thickness=0.05,
       perlin_cfg=PerlinPlaneTerrainCfg(
@@ -317,8 +307,8 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
       step_height_range=(0.05, 0.45),
       step_width=1.5,
       platform_width=4.0,
-      border_width=1.0,
-      wall_prob=[0.3, 0.3, 0.3, 0.3],
+      border_width=_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH,
+      wall_prob=[0.0, 0.0, 0.0, 0.0],
       wall_height=5.0,
       wall_thickness=0.05,
       perlin_cfg=PerlinPlaneTerrainCfg(
@@ -347,7 +337,7 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
       obstacle_height_range=(0.05, 0.45),
       platform_width=1.5,
       border_width=_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH,
-      wall_prob=[0.3, 0.3, 0.3, 0.3],
+      wall_prob=[0.0, 0.0, 0.0, 0.0],
       wall_height=5.0,
       wall_thickness=0.05,
       perlin_cfg=PerlinPlaneTerrainCfg(
@@ -364,20 +354,26 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
         ),
       },
     ),
-    "mesh_boxes": PerlinMeshRandomMultiBoxTerrainCfg(
+    # Keep key name for command-range compatibility, but use pure hfield generation.
+    "mesh_boxes": PerlinDiscreteObstaclesTerrainCfg(
       proportion=0.10,
-      box_height_mean=[0.1, 0.4],
-      box_height_range=0.05,
-      box_length_mean=0.4,
-      box_length_range=0.1,
-      box_width_mean=0.4,
-      box_width_range=0.1,
+      num_obstacles=120,
+      obstacle_height_mode="fixed",
+      obstacle_width_range=(0.30, 0.50),
+      obstacle_height_range=(0.05, 0.45),
       platform_width=1.5,
-      generation_ratio=0.3,
-      no_perlin_at_obstacle=True,
-      wall_prob=[0.3, 0.3, 0.3, 0.3],
+      border_width=_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH,
+      wall_prob=[0.0, 0.0, 0.0, 0.0],
       wall_height=5.0,
       wall_thickness=0.05,
+      perlin_cfg=PerlinPlaneTerrainCfg(
+        noise_scale=0.05,
+        noise_frequency=20,
+        fractal_octaves=2,
+        fractal_lacunarity=2.0,
+        fractal_gain=0.25,
+        centering=True,
+      ),
       flat_patch_sampling={
         "target": FlatPatchSamplingCfg(
           num_patches=50, patch_radius=[0.05, 0.10, 0.15], max_height_diff=0.05
@@ -389,7 +385,7 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
       slope_range=(0.0, 0.7),
       platform_width=1.5,
       border_width=_PARKOUR_WALL_ALIGNMENT_BORDER_WIDTH,
-      wall_prob=[0.3, 0.3, 0.3, 0.3],
+      wall_prob=[0.0, 0.0, 0.0, 0.0],
       wall_height=5.0,
       wall_thickness=0.05,
       perlin_cfg=PerlinPlaneTerrainCfg(
@@ -1164,7 +1160,7 @@ def set_parkour_terrain(cfg: ManagerBasedRlEnvCfg, play: bool) -> None:
     min_points=2,
   )
   cfg.scene.terrain = TerrainImporterCfg(
-    terrain_type="generator",
+    terrain_type="hacked_generator",
     terrain_generator=copy.deepcopy(terrain_gen),
     max_init_terrain_level=5,
     collision_debug_vis=False,
@@ -1207,10 +1203,10 @@ def set_parkour_basic_settings(cfg: ManagerBasedRlEnvCfg) -> None:
   cfg.episode_length_s = 20.0
   # Parkour introduces many simultaneous terrain contacts; fixed small caps from
   # tracking (nconmax=35, njmax=250) can overflow and drop contact constraints.
-  # Keep contact slots auto-sized, but raise constraint capacity to avoid
-  # frequent "nefc overflow" warnings under rough-terrain contact bursts.
+  # Keep contact slots auto-sized, and set a sufficiently large constraint
+  # capacity to avoid mjwarp init/runtime overflow on rough-terrain mixes.
   cfg.sim.nconmax = None
-  cfg.sim.njmax = 384
+  cfg.sim.njmax = 1024
   # Increase CCD iterations moderately to reduce "opt.ccd_iterations needs to be increased".
   cfg.sim.mujoco.ccd_iterations = 100
 

@@ -29,6 +29,7 @@ class TerrainImporterCfg(TerrainImporterCfgBase):
     Available options are "plane" and "generator".
 
     ## NOTE
-    The TerrainImporter of this package has some dedicated hack to fit the self-defined tasks.
-    We add a "hacked_generator" option to hack and run our own terrain generator implementation.
+    The TerrainImporter keeps "hacked_generator" as a compatibility alias.
+    Runtime behavior is mjlab-native and routes "hacked_generator" through
+    the same generator pipeline as "generator".
     """

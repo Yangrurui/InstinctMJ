@@ -1,13 +1,122 @@
 from dataclasses import MISSING, dataclass, field
 from typing import List
+import uuid
 
 import mujoco
 import numpy as np
+import trimesh
 
 from mjlab.terrains import SubTerrainCfg as SubTerrainBaseCfg
+from mjlab.terrains.terrain_generator import TerrainGeometry, TerrainOutput
 
 from ..height_field.hf_terrains_cfg import PerlinPlaneTerrainCfg
 from . import mesh_terrains
+
+
+def _normalize_legacy_meshes(
+    meshes: trimesh.Trimesh | list[trimesh.Trimesh] | tuple[trimesh.Trimesh, ...],
+) -> list[trimesh.Trimesh]:
+    if isinstance(meshes, trimesh.Trimesh):
+        meshes_list = [meshes]
+    elif isinstance(meshes, (list, tuple)):
+        meshes_list = list(meshes)
+    else:
+        raise TypeError(
+            "Legacy terrain function must return trimesh.Trimesh or a list/tuple of trimesh.Trimesh."
+        )
+    for mesh in meshes_list:
+        if not isinstance(mesh, trimesh.Trimesh):
+            raise TypeError("Legacy terrain function returned a non-trimesh mesh entry.")
+    return meshes_list
+
+
+def _sample_legacy_mesh_flat_patches(
+    *,
+    meshes_list: list[trimesh.Trimesh],
+    origin: np.ndarray,
+    cfg: SubTerrainBaseCfg,
+) -> dict[str, np.ndarray] | None:
+    patch_sampling = getattr(cfg, "flat_patch_sampling", None)
+    if patch_sampling is None:
+        return None
+
+    from instinct_mjlab.terrains.terrain_generator import _find_flat_patches_on_surface_mesh
+
+    if len(meshes_list) == 0:
+        raise RuntimeError("Legacy terrain function returned an empty mesh list.")
+    if len(meshes_list) == 1:
+        sampling_mesh = meshes_list[0]
+    else:
+        sampling_mesh = trimesh.util.concatenate(meshes_list)
+
+    origin = np.asarray(origin, dtype=np.float64)
+    flat_patches: dict[str, np.ndarray] = {}
+    for patch_name, patch_cfg in patch_sampling.items():
+        sampled_local = _find_flat_patches_on_surface_mesh(
+            sampling_mesh,
+            device="cpu",
+            num_patches=patch_cfg.num_patches,
+            patch_radius=patch_cfg.patch_radius,
+            origin=origin,
+            x_range=patch_cfg.x_range,
+            y_range=patch_cfg.y_range,
+            z_range=patch_cfg.z_range,
+            max_height_diff=patch_cfg.max_height_diff,
+        )
+        # `_find_flat_patches_on_surface_mesh` returns samples relative to `origin`.
+        flat_patches[patch_name] = sampled_local + origin
+    return flat_patches
+
+
+def _legacy_mesh_to_terrain_output(
+    *,
+    meshes: trimesh.Trimesh | list[trimesh.Trimesh] | tuple[trimesh.Trimesh, ...],
+    origin: np.ndarray,
+    spec: mujoco.MjSpec,
+    flat_patches: dict[str, np.ndarray] | None,
+) -> TerrainOutput:
+    """Convert legacy `(meshes, origin)` output into mjlab `TerrainOutput`."""
+    meshes_list = _normalize_legacy_meshes(meshes)
+
+    body = spec.body("terrain")
+    geometries: list[TerrainGeometry] = []
+    for mesh in meshes_list:
+        bounds = np.asarray(mesh.bounds, dtype=np.float64)
+        extents = bounds[1] - bounds[0]
+        collapsed_axes = np.where(extents < 1.0e-9)[0]
+        if len(collapsed_axes) == 1:
+            # MuJoCo mesh compilation requires non-zero 3D volume.
+            # Legacy terrains may include perfectly planar meshes (for example
+            # random_multi_box ground with z=0). Convert them to a thin box
+            # geom while preserving the original supporting plane location.
+            collapsed_axis = int(collapsed_axes[0])
+            thin = 1.0e-3
+            center = (bounds[0] + bounds[1]) * 0.5
+            center[collapsed_axis] = bounds[1, collapsed_axis] - thin * 0.5
+            box_extents = extents.copy()
+            box_extents[collapsed_axis] = thin
+            box_geom = body.add_geom(
+                type=mujoco.mjtGeom.mjGEOM_BOX,
+                size=(box_extents * 0.5).tolist(),
+                pos=center.tolist(),
+            )
+            geometries.append(TerrainGeometry(geom=box_geom))
+            continue
+
+        mesh_name = f"legacy_mesh_{uuid.uuid4().hex}"
+        spec.add_mesh(
+            name=mesh_name,
+            uservert=np.asarray(mesh.vertices, dtype=np.float32).reshape(-1).tolist(),
+            userface=np.asarray(mesh.faces, dtype=np.int32).reshape(-1).tolist(),
+        )
+        geom = body.add_geom(type=mujoco.mjtGeom.mjGEOM_MESH, meshname=mesh_name, pos=(0.0, 0.0, 0.0))
+        geometries.append(TerrainGeometry(geom=geom))
+
+    return TerrainOutput(
+        origin=np.asarray(origin, dtype=np.float64),
+        geometries=geometries,
+        flat_patches=flat_patches,
+    )
 
 @dataclass
 class WallTerrainCfgMixin:
@@ -320,7 +429,7 @@ class MotionMatchedTerrainCfg(SubTerrainBaseCfg):
 class PerlinMeshFloatingBoxTerrainCfg(SubTerrainBaseCfg, WallTerrainCfgMixin):
     """Configuration for a floating box mesh terrain."""
 
-    function: object = mesh_terrains.floating_box_terrain
+    legacy_function: object = mesh_terrains.floating_box_terrain
 
     floating_height: tuple[float, float] | float = MISSING
     """The height of the box above the ground. Could be a fixed value or a range (min, max)."""
@@ -339,11 +448,32 @@ class PerlinMeshFloatingBoxTerrainCfg(SubTerrainBaseCfg, WallTerrainCfgMixin):
     no_perlin_at_obstacle: bool = True
     """If True, no perlin noise will be generated exactly below the box."""
 
+    def function(
+        self,
+        difficulty: float,
+        spec: mujoco.MjSpec,
+        rng: np.random.Generator,
+    ) -> TerrainOutput:
+        del rng  # legacy implementation uses numpy global RNG internally
+        meshes, origin = self.legacy_function(difficulty, self)
+        meshes_list = _normalize_legacy_meshes(meshes)
+        flat_patches = _sample_legacy_mesh_flat_patches(
+            meshes_list=meshes_list,
+            origin=np.asarray(origin, dtype=np.float64),
+            cfg=self,
+        )
+        return _legacy_mesh_to_terrain_output(
+            meshes=meshes_list,
+            origin=origin,
+            spec=spec,
+            flat_patches=flat_patches,
+        )
+
 @dataclass(kw_only=True)
 class PerlinMeshRandomMultiBoxTerrainCfg(SubTerrainBaseCfg, WallTerrainCfgMixin):
     """Configuration for a sub terrain with multiple random boxes with perlin noise."""
 
-    function: object = mesh_terrains.random_multi_box_terrain
+    legacy_function: object = mesh_terrains.random_multi_box_terrain
 
     box_height_mean: tuple[float, float] | float = MISSING
     box_height_range: float = MISSING
@@ -362,3 +492,24 @@ class PerlinMeshRandomMultiBoxTerrainCfg(SubTerrainBaseCfg, WallTerrainCfgMixin)
     no_perlin_at_obstacle: bool = False
     box_perlin_cfg: PerlinPlaneTerrainCfg | None = None
     """Used only when perlin_cfg is not None"""
+
+    def function(
+        self,
+        difficulty: float,
+        spec: mujoco.MjSpec,
+        rng: np.random.Generator,
+    ) -> TerrainOutput:
+        del rng  # legacy implementation uses numpy global RNG internally
+        meshes, origin = self.legacy_function(difficulty, self)
+        meshes_list = _normalize_legacy_meshes(meshes)
+        flat_patches = _sample_legacy_mesh_flat_patches(
+            meshes_list=meshes_list,
+            origin=np.asarray(origin, dtype=np.float64),
+            cfg=self,
+        )
+        return _legacy_mesh_to_terrain_output(
+            meshes=meshes_list,
+            origin=origin,
+            spec=spec,
+            flat_patches=flat_patches,
+        )
