@@ -168,9 +168,6 @@ class PoseRefCommand(ShadowingCommandBase):
         """
         # initialize the base class
         super().__init__(cfg, env)
-        # update self.cfg.realtime_mode for backward compatibility
-        if isinstance(self.cfg.realtime_mode, bool):
-            self.cfg.realtime_mode = int(self.cfg.realtime_mode)
         # generate the command tensor buffer
         if self.cfg.rotation_mode == "quaternion":
             data_dims = (3 + 4,)
@@ -359,9 +356,6 @@ class PositionRefCommand(ShadowingCommandBase):
         """
         # initialize the base class
         super().__init__(cfg, env)
-        # update self.cfg.realtime_mode for backward compatibility
-        if isinstance(self.cfg.realtime_mode, bool):
-            self.cfg.realtime_mode = int(self.cfg.realtime_mode)
         # generate the command tensor buffer
         self._command = torch.ones(
             (self.num_envs, self._motion_reference.num_frames, 3),
@@ -454,9 +448,6 @@ class RotationRefCommand(ShadowingCommandBase):
     def __init__(self, cfg: RotationRefCommandCfg, env: ManagerBasedRLEnv):
         """Initialize the command term class."""
         super().__init__(cfg, env)
-        # update self.cfg.realtime_mode for backward compatibility
-        if isinstance(self.cfg.realtime_mode, bool):
-            self.cfg.realtime_mode = int(self.cfg.realtime_mode)
         # generate the command tensor buffer
         if self.cfg.rotation_mode == "quaternion":
             data_dims = (4,)

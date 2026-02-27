@@ -8,7 +8,7 @@ from functools import partial
 import mjlab.envs.mdp as mdp
 import mjlab.sim as sim_utils
 from mjlab.managers import EventTermCfg, SceneEntityCfg
-from instinct_mjlab.envs.viewer_cfg import InstinctLabViewerConfig as ViewerConfig
+from mjlab.viewer.viewer_config import ViewerConfig
 
 import instinct_mjlab.envs.mdp as instinct_mdp
 import instinct_mjlab.tasks.shadowing.mdp as shadowing_mdp
@@ -173,6 +173,8 @@ class G1PerceptiveShadowingEnvCfg(perceptual_cfg.PerceptiveShadowingEnvCfg):
         # Set contact/constraint capacities explicitly for perceptive shadowing.
         self.sim.njmax = 700
         self.sim.nconmax = 128
+        # Use sparse Jacobian explicitly to avoid dense Jacobian unsupported path for nv > 60 in mjwarp.
+        self.sim.mujoco.jacobian = "sparse"
         # Raise CCD iterations for perceptive terrain contacts (default 50 can trigger EPA horizon warnings).
         self.sim.mujoco.ccd_iterations = 128
         # Mirror parkour CCD mode for dense terrain contact pairs.

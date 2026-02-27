@@ -21,7 +21,7 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
-from instinct_mjlab.envs.viewer_cfg import InstinctLabViewerConfig as ViewerConfig
+from mjlab.viewer.viewer_config import ViewerConfig
 
 import instinct_mjlab.envs.mdp as instinct_mdp
 import instinct_mjlab.tasks.locomotion.mdp as locomotion_mdp

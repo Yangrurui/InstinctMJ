@@ -16,7 +16,7 @@ from pathlib import Path
 import mujoco
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
-from instinct_mjlab.envs.viewer_cfg import InstinctLabViewerConfig as ViewerConfig
+from mjlab.viewer.viewer_config import ViewerConfig
 
 from mjlab.tasks.tracking.config.g1.env_cfgs import unitree_g1_flat_tracking_env_cfg
 

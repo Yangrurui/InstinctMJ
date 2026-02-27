@@ -18,7 +18,7 @@ from mjlab.scene import SceneCfg
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg
 from mjlab.utils.spec_config import CollisionCfg
-from instinct_mjlab.envs.viewer_cfg import InstinctLabViewerConfig as ViewerConfig
+from mjlab.viewer.viewer_config import ViewerConfig
 
 import instinct_mjlab.envs.mdp as instinct_mdp
 import instinct_mjlab.tasks.shadowing.beyondmimic.beyondmimic_env_cfg as beyondmimic_cfg

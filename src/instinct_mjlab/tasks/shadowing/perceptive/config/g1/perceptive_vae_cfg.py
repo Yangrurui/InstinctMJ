@@ -13,7 +13,7 @@ from mjlab.managers import ObservationTermCfg as ObsTermCfg
 from mjlab.managers import SceneEntityCfg
 from mjlab.managers import TerminationTermCfg as DoneTermCfg
 from mjlab.utils.noise import UniformNoiseCfg
-from instinct_mjlab.envs.viewer_cfg import InstinctLabViewerConfig as ViewerConfig
+from mjlab.viewer.viewer_config import ViewerConfig
 
 import instinct_mjlab.envs.mdp as instinct_mdp
 import instinct_mjlab.tasks.shadowing.mdp as shadowing_mdp
@@ -285,6 +285,8 @@ class G1PerceptiveVaeEnvCfg(perceptual_cfg.PerceptiveShadowingEnvCfg):
         self.observations["policy"].terms["depth_image"].params["history_skip_frames"] = 3
         robot_cfg.articulation.actuators = beyondmimic_g1_29dof_actuator_cfgs
         self.actions["joint_pos"].scale = beyondmimic_action_scale
+        # Use sparse Jacobian explicitly to avoid dense Jacobian unsupported path for nv > 60 in mjwarp.
+        self.sim.mujoco.jacobian = "sparse"
 
         motion_buffer = list(motion_reference_cfg.motion_buffers.values())[0]
         _apply_motion_matched_terrain_source(

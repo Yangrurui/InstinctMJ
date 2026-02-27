@@ -3,15 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from mjlab.envs.manager_based_rl_env import ManagerBasedRlEnvCfg
-
-from instinct_mjlab.envs.viewer_cfg import InstinctLabViewerConfig
+from mjlab.viewer.viewer_config import ViewerConfig
 
 
 @dataclass
 class InstinctLabRLEnvCfg(ManagerBasedRlEnvCfg):
   """Configuration for a reinforcement learning environment with the manager-based workflow."""
 
-  viewer: InstinctLabViewerConfig = field(default_factory=InstinctLabViewerConfig)
+  viewer: ViewerConfig = field(default_factory=ViewerConfig)
   """Viewer Settings."""
 
   # monitor settings

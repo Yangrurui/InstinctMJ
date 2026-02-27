@@ -26,7 +26,7 @@ from mjlab.tasks.tracking import mdp as tracking_mdp
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg
 from mjlab.utils.spec_config import MaterialCfg, TextureCfg
-from instinct_mjlab.envs.viewer_cfg import InstinctLabViewerConfig as ViewerConfig
+from mjlab.viewer.viewer_config import ViewerConfig
 
 import instinct_mjlab.envs.mdp as instinct_mdp
 from instinct_mjlab.assets.unitree_g1 import (
