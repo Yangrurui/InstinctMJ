@@ -321,20 +321,19 @@ def make_beyondmimic_observations() -> dict[str, ObsGroupCfg]:
 def make_beyondmimic_rewards() -> dict[str, RewTermCfg | None]:
     """BeyondMimic reward terms following their approach."""
     return {
-        "motion_global_root_pos": RewTermCfg(
-            func=instinct_mdp.base_position_tracking_gauss,
+        "base_position_imitation_gauss": RewTermCfg(
+            func=instinct_mdp.base_position_imitation_gauss,
             weight=0.5,
             params={
-                "tracking_sigma": 0.3,
-                "tracking_torlerance": 0.0,
+                "std": 0.3,
             },
         ),
-        "motion_global_root_ori": RewTermCfg(
-            func=instinct_mdp.base_rot_tracking_gauss,
+        "base_rot_imitation_gauss": RewTermCfg(
+            func=instinct_mdp.base_rot_imitation_gauss,
             weight=0.5,
             params={
-                "tracking_sigma": 0.4,
-                "tracking_torlerance": 0.0,
+                "std": 0.4,
+                "difference_type": "axis_angle",
             },
         ),
         "motion_body_pos": RewTermCfg(

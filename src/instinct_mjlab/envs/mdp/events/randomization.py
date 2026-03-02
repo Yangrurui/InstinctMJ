@@ -5,7 +5,9 @@ from typing import TYPE_CHECKING, Literal
 
 from instinct_mjlab.envs import ManagerBasedRLEnv
 from instinct_mjlab.sensors.grouped_ray_caster import GroupedRayCaster
+from mjlab.envs.mdp import dr
 from mjlab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
+from mjlab.managers.event_manager import RecomputeLevel, requires_model_fields
 from mjlab.sensor import RayCastSensor as RayCaster
 from mjlab.utils.lab_api import math as math_utils
 
@@ -17,6 +19,14 @@ if TYPE_CHECKING:
     from mjlab.sensor import RayCastSensor as RayCasterCamera
 
 ManagerBasedEnv = ManagerBasedRLEnv
+
+# DR engine builtin `add` uses defaults; this custom op adds sampled offsets to current model values.
+_DR_ADD_CURRENT = dr.Operation(
+    name="add_current",
+    initialize=torch.zeros_like,
+    combine=torch.add,
+    uses_defaults=False,
+)
 
 
 def _randomize_prop_by_op(
@@ -73,6 +83,7 @@ def _randomize_prop_by_op(
     return data_randomized
 
 
+@requires_model_fields("body_ipos", "body_iquat", recompute=RecomputeLevel.set_const)
 def randomize_body_com_uniform(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,
@@ -93,56 +104,60 @@ def randomize_body_com_uniform(
 
     # resolve environment ids
     if env_ids is None:
-        env_ids = torch.arange(env.scene.num_envs, device=env.device)
-
-    coms = asset.root_physx_view.get_coms().clone()  # (num_envs, num_bodies, 7) (x, y, z, qx, qy, qz, qw)
-    # resolve body indices
-    if asset_cfg.body_ids == slice(None):
-        body_ids = torch.arange(coms.shape[1], dtype=torch.long, device=coms.device)
-        num_bodies = coms.shape[1]
+        env_ids = torch.arange(env.scene.num_envs, dtype=torch.long, device=env.device)
     else:
-        body_ids = torch.tensor(asset_cfg.body_ids, dtype=torch.long, device=coms.device)
-        num_bodies = len(body_ids)
-    # flatten env_ids and body_ids for indexing
-    env_ids = env_ids.to(coms.device)
-    env_ids_, body_ids_ = torch.meshgrid(env_ids, body_ids, indexing="ij")
-    env_ids_ = env_ids_.flatten()  # (num_envs * num_bodies,)
-    body_ids_ = body_ids_.flatten()  # (num_envs * num_bodies,)
+        env_ids = env_ids.to(device=env.device, dtype=torch.long)
 
-    range_list = [com_pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
-    ranges = torch.tensor(range_list, device=coms.device)  # (6, 2)
-    rand_samples = math_utils.sample_uniform(
-        ranges[:, 0],
-        ranges[:, 1],
-        (len(env_ids) * num_bodies, 6),
-        device=coms.device,
+    # resolve body indices (global ids in MuJoCo model arrays)
+    if asset_cfg.body_ids == slice(None):
+        body_ids = asset.indexing.body_ids
+    else:
+        body_ids_local = torch.tensor(asset_cfg.body_ids, dtype=torch.long, device=env.device)
+        body_ids = asset.indexing.body_ids[body_ids_local]
+
+    env_grid, body_grid = torch.meshgrid(env_ids, body_ids, indexing="ij")
+
+    body_ipos = env.sim.model.body_ipos[env_grid, body_grid].clone()  # (num_envs, num_bodies, 3)
+    body_iquat = env.sim.model.body_iquat[env_grid, body_grid].clone()  # (num_envs, num_bodies, 4), wxyz
+
+    pos_ranges = torch.tensor(
+        [com_pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z"]],
+        device=env.device,
     )
-    position_samples = rand_samples[..., :3]  # (num_envs * num_bodies, 3)
+    pos_samples = math_utils.sample_uniform(
+        pos_ranges[:, 0],
+        pos_ranges[:, 1],
+        body_ipos.shape,
+        device=env.device,
+    )
+
+    rot_ranges = torch.tensor(
+        [com_pose_range.get(key, (0.0, 0.0)) for key in ["roll", "pitch", "yaw"]],
+        device=env.device,
+    )
+    rot_samples = math_utils.sample_uniform(
+        rot_ranges[:, 0],
+        rot_ranges[:, 1],
+        (*body_iquat.shape[:-1], 3),
+        device=env.device,
+    )
     rotation_samples = math_utils.quat_from_euler_xyz(
-        rand_samples[..., 3],
-        rand_samples[..., 4],
-        rand_samples[..., 5],
-    )  # (num_envs * num_bodies, 4) (w, x, y, z)
+        rot_samples[..., 0],
+        rot_samples[..., 1],
+        rot_samples[..., 2],
+    )
+
     if operation == "add":
-        coms[env_ids_, body_ids_, :3] += position_samples
-        coms[env_ids_, body_ids_, 3:] = math_utils.convert_quat(
-            math_utils.quat_mul(
-                math_utils.convert_quat(coms[env_ids_, body_ids_, 3:], to="wxyz"),
-                rotation_samples,
-            ),
-            to="xyzw",
-        )
+        body_ipos += pos_samples
+        body_iquat = math_utils.quat_mul(body_iquat, rotation_samples)
     elif operation == "abs":
-        coms[env_ids_, body_ids_, :3] = position_samples
-        coms[env_ids_, body_ids_, 3:] = math_utils.convert_quat(
-            rotation_samples,
-            to="xyzw",
-        )
+        body_ipos = pos_samples
+        body_iquat = rotation_samples
     else:
         raise ValueError(f"Invalid operation: {operation}. Use 'add' or 'abs'.")
 
-    # set the new COMs to the asset
-    asset.root_physx_view.set_coms(coms.cpu(), env_ids.cpu())
+    env.sim.model.body_ipos[env_grid, body_grid] = body_ipos
+    env.sim.model.body_iquat[env_grid, body_grid] = body_iquat
 
 
 def randomize_rigid_body_coms(
@@ -159,21 +174,19 @@ def randomize_rigid_body_coms(
         This function uses CPU tensors to assign the body coms. It is recommended to use this function
         only during the initialization of the environment.
     """
-    # In mjlab, delegate to the built-in DR API for body_ipos which
-    # properly handles the simulation model data views.
-    from mjlab.envs.mdp import dr
-
+    # Keep InstinctLab "add to current values" semantics while using the model-field DR engine.
     dr.body_ipos(
-        env,
-        env_ids,
+        env=env,
+        env_ids=env_ids,
         ranges={
             0: coms_x_distribution_params,
             1: coms_y_distribution_params,
             2: coms_z_distribution_params,
         },
-        distribution=distribution,
-        operation="add",
         asset_cfg=asset_cfg,
+        distribution=distribution,
+        operation=_DR_ADD_CURRENT,
+        axes=[0, 1, 2],
     )
 
 
@@ -387,31 +400,26 @@ def randomize_rigid_body_material(
     restitution_range: tuple[float, float] = (0.0, 0.5),
     num_buckets: int = 64,
 ) -> None:
-    """Randomize rigid body material properties (friction).
+    """Randomize rigid body material properties with MuJoCo-equivalent friction.
 
-    In MuJoCo, friction is represented as (slide, torsional, rolling) per geom,
-    rather than Isaac Sim's (static, dynamic, restitution) per rigid body. This
-    function maps static_friction_range to geom slide friction (axis 0).
-    dynamic_friction_range and restitution_range are currently unused since
-    MuJoCo does not have direct equivalents, but the interface is kept
-    compatible with the Isaac Lab API.
-
-    Args:
-        env: The environment.
-        env_ids: Environment IDs to randomize.
-        asset_cfg: Asset configuration.
-        static_friction_range: Range for static friction (mapped to slide friction).
-        dynamic_friction_range: Range for dynamic friction (unused in MuJoCo).
-        restitution_range: Range for restitution (unused in MuJoCo).
-        num_buckets: Number of friction buckets (unused, kept for API compat).
+    InstinctLab/PhysX uses static+dynamic friction and restitution. MuJoCo geoms
+    expose slide/spin/roll friction and no direct restitution coefficient. We map
+    static+dynamic friction ranges to slide friction (axis 0) and keep the
+    restitution argument for API compatibility.
     """
-    from mjlab.envs.mdp import dr
+    # Closest MuJoCo equivalent to PhysX static/dynamic friction is slide
+    # friction. Use both ranges to form a conservative interval.
+    slide_friction_range = (
+        min(static_friction_range[0], dynamic_friction_range[0]),
+        max(static_friction_range[1], dynamic_friction_range[1]),
+    )
 
+    # MuJoCo has no direct restitution coefficient per geom.
+    del num_buckets, restitution_range
     dr.geom_friction(
         env,
         env_ids=env_ids,
-        ranges={0: static_friction_range},
-        distribution="uniform",
+        ranges=slide_friction_range,
         operation="abs",
         asset_cfg=asset_cfg,
         shared_random=True,

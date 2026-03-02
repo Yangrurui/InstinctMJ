@@ -121,13 +121,13 @@ def get_base_velocity_difference(
 
     if anchor_frame == "world":
         # obtain the base velocity of the robot in world frame
-        base_vel = asset.data.root_lin_vel_w
+        base_vel = asset.data.root_link_lin_vel_w
         ref_base_vel = motion_reference.data.base_lin_vel_w[
             motion_reference.ALL_INDICES, motion_reference.aiming_frame_idx
         ]
     elif anchor_frame == "robot":
         # obtain the base velocity of the robot in robot frame
-        base_vel = asset.data.root_lin_vel_b
+        base_vel = asset.data.root_link_lin_vel_b
         anchor_quat = asset.data.root_link_quat_w
         ref_base_vel = math_utils.quat_apply_inverse(
             anchor_quat,
@@ -136,7 +136,7 @@ def get_base_velocity_difference(
     elif anchor_frame == "reference":
         # obtain the base velocity of the robot in reference frame
         anchor_quat = motion_reference.data.base_quat_w[motion_reference.ALL_INDICES, motion_reference.aiming_frame_idx]
-        base_vel = math_utils.quat_apply_inverse(anchor_quat, asset.data.root_lin_vel_w)
+        base_vel = math_utils.quat_apply_inverse(anchor_quat, asset.data.root_link_lin_vel_w)
         ref_base_vel = math_utils.quat_apply_inverse(
             anchor_quat,
             motion_reference.data.base_lin_vel_w[motion_reference.ALL_INDICES, motion_reference.aiming_frame_idx],

@@ -16,6 +16,7 @@ from instinct_mjlab.utils.timestamped_buffer import TimestampedBuffer
 from .motion_reference_data import MotionReferenceData, MotionReferenceState
 
 if TYPE_CHECKING:
+    from mjlab.viewer.debug_visualizer import DebugVisualizer
     from .motion_reference_cfg import MotionReferenceManagerCfg
     from .motion_buffer import MotionBuffer
 
@@ -487,11 +488,11 @@ class MotionReferenceManager(Sensor):
     def target_link_pose_forward_kinematics(self, joint_pos: torch.Tensor) -> torch.Tensor:
         """Considering the interested link of the motion reference is known from config, the forward kinematics output
         can be fixed to a series of link poses. This function is used to compute the target link poses from the joint
-        positions (in isaacSim order).
+        positions (in simulation joint order).
         NOTE: This method serve as a callable object for the motion buffer to compute the target link poses. It should
         be optimized for faster computation later.
         ## Args:
-            - joint_pos: (N, num_dofs) tensor, the joint positions in isaacSim order.
+            - joint_pos: (N, num_dofs) tensor, the joint positions in simulation joint order.
         ## Returns:
             The target link poses in base_link frame. (N, num_link_to_ref, 7) tensor, in the order or `self.cfg.link_of_interests`.
         """
@@ -1104,15 +1105,80 @@ class MotionReferenceManager(Sensor):
             env_ids=self.ALL_INDICES,
         )
 
-    def debug_vis(self, visualizer) -> None:
+    def debug_vis(self, visualizer: "DebugVisualizer") -> None:
         """Debug visualization (mjlab Sensor interface)."""
-        del visualizer
         if not self._is_initialized:
             return
 
+        env_ids = list(visualizer.get_env_indices(self._num_envs))
+        if not env_ids:
+            return
+        env_ids_t = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+        aiming_frame_idx = self.aiming_frame_idx[env_ids_t]
+        marker_cfgs = getattr(self.cfg.visualizer_cfg, "markers", {})
+
         if self.cfg.visualizing_marker_types:
-            # Legacy IsaacLab marker pipeline removed in mjlab-native mode.
-            pass
+            if "root" in self.cfg.visualizing_marker_types:
+                root_marker_cfg = marker_cfgs.get("root_frame_ref", None)
+                root_scale_cfg = getattr(root_marker_cfg, "scale", (0.15, 0.15, 0.15))
+                root_scale = float(root_scale_cfg[0]) if isinstance(root_scale_cfg, (list, tuple)) else float(root_scale_cfg)
+                root_axis_radius = max(root_scale * 0.08, 1.0e-4)
+                root_color = getattr(root_marker_cfg, "color", (1.0, 1.0, 1.0, 1.0))
+                axis_colors = (
+                    (float(root_color[0]), float(root_color[1]), float(root_color[2])),
+                    (float(root_color[0]), float(root_color[1]), float(root_color[2])),
+                    (float(root_color[0]), float(root_color[1]), float(root_color[2])),
+                )
+                for i, env_id in enumerate(env_ids_t):
+                    frame_idx = int(aiming_frame_idx[i].item())
+                    root_pos_w = self.data.base_pos_w[env_id, frame_idx]
+                    root_quat_w = self.data.base_quat_w[env_id, frame_idx]
+                    root_rot = math_utils.matrix_from_quat(root_quat_w.unsqueeze(0))[0]
+                    visualizer.add_frame(
+                        position=root_pos_w,
+                        rotation_matrix=root_rot,
+                        scale=root_scale,
+                        axis_radius=root_axis_radius,
+                        alpha=float(root_color[3]),
+                        axis_colors=axis_colors,
+                    )
+
+            if "links" in self.cfg.visualizing_marker_types:
+                link_marker_cfg = marker_cfgs.get("link_ref", None)
+                link_radius = float(getattr(link_marker_cfg, "radius", 0.04))
+                link_color = tuple(getattr(link_marker_cfg, "color", (0.0, 1.0, 0.0, 1.0)))
+                for i, env_id in enumerate(env_ids_t):
+                    frame_idx = int(aiming_frame_idx[i].item())
+                    link_pos_w = self.data.link_pos_w[env_id, frame_idx]
+                    for point in link_pos_w:
+                        visualizer.add_sphere(center=point, radius=link_radius, color=link_color)
+
+            if "relative_links" in self.cfg.visualizing_marker_types:
+                rel_marker_cfg = marker_cfgs.get("relative_link_ref", None)
+                rel_scale_cfg = getattr(rel_marker_cfg, "scale", (0.05, 0.05, 0.05))
+                rel_scale = float(rel_scale_cfg[0]) if isinstance(rel_scale_cfg, (list, tuple)) else float(rel_scale_cfg)
+                rel_axis_radius = max(rel_scale * 0.08, 1.0e-4)
+                rel_color = getattr(rel_marker_cfg, "color", (1.0, 1.0, 1.0, 1.0))
+                rel_axis_colors = (
+                    (float(rel_color[0]), float(rel_color[1]), float(rel_color[2])),
+                    (float(rel_color[0]), float(rel_color[1]), float(rel_color[2])),
+                    (float(rel_color[0]), float(rel_color[1]), float(rel_color[2])),
+                )
+                relative_link_pos_w = self.reference_link_pos_relative_w[env_ids_t]
+                relative_link_quat_w = self.reference_link_quat_relative_w[env_ids_t]
+                relative_link_rot = math_utils.matrix_from_quat(relative_link_quat_w.reshape(-1, 4)).reshape(
+                    relative_link_quat_w.shape[0], relative_link_quat_w.shape[1], 3, 3
+                )
+                for i in range(relative_link_pos_w.shape[0]):
+                    for link_i in range(relative_link_pos_w.shape[1]):
+                        visualizer.add_frame(
+                            position=relative_link_pos_w[i, link_i],
+                            rotation_matrix=relative_link_rot[i, link_i],
+                            scale=rel_scale,
+                            axis_radius=rel_axis_radius,
+                            alpha=float(rel_color[3]),
+                            axis_colors=rel_axis_colors,
+                        )
 
         if not hasattr(self, "_reference_entity"):
             self._find_reference_view()

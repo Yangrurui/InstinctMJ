@@ -4,7 +4,6 @@ import torch
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-import mjlab.sim as sim_utils
 from mjlab.managers import CommandTerm, SceneEntityCfg
 from mjlab.utils.lab_api import math as math_utils
 
@@ -14,6 +13,7 @@ if TYPE_CHECKING:
     from instinct_mjlab.envs import ManagerBasedRLEnv
 
     from instinct_mjlab.motion_reference import MotionReferenceManager
+    from mjlab.viewer.debug_visualizer import DebugVisualizer
 
     from .commands_cfg import (
         BaseHeightRefCommandCfg,
@@ -35,6 +35,148 @@ if TYPE_CHECKING:
         ShadowingCommandBaseCfg,
         TimeToTargetCommandCfg,
     )
+
+
+class _MjlabMarkerVisualizer:
+    """Minimal marker helper using mjlab native DebugVisualizer primitives."""
+
+    def __init__(self, visualizer: "DebugVisualizer", cfg, num_envs: int):
+        self._visualizer = visualizer
+        self._cfg = cfg
+        self._num_envs = num_envs
+
+    @staticmethod
+    def _as_tensor(value, device: torch.device | str | None = None) -> torch.Tensor:
+        if value is None:
+            return torch.empty(0, device=device)
+        if torch.is_tensor(value):
+            return value
+        return torch.as_tensor(value, device=device)
+
+    def _iter_selected_indices(self, num_items: int):
+        if num_items <= 0:
+            return []
+        if self._num_envs <= 0:
+            return list(range(num_items))
+
+        env_indices = list(self._visualizer.get_env_indices(self._num_envs))
+        if not env_indices:
+            return []
+
+        if num_items == self._num_envs:
+            return env_indices
+        if num_items % self._num_envs == 0:
+            items_per_env = num_items // self._num_envs
+            indices = []
+            for env_idx in env_indices:
+                begin = env_idx * items_per_env
+                end = begin + items_per_env
+                indices.extend(range(begin, end))
+            return indices
+        return list(range(num_items))
+
+    @staticmethod
+    def _marker_color(marker_cfg, default=(0.0, 1.0, 1.0, 0.8)):
+        color = getattr(marker_cfg, "color", default)
+        if color is None:
+            return default
+        return tuple(float(v) for v in color)
+
+    def visualize(
+        self,
+        translations: torch.Tensor,
+        orientations: torch.Tensor | None = None,
+        scales: torch.Tensor | None = None,
+    ) -> None:
+        if translations is None:
+            return
+
+        translations_t = self._as_tensor(translations).reshape(-1, 3)
+        if translations_t.numel() == 0:
+            return
+        device = translations_t.device
+
+        if orientations is not None:
+            orientations_t = self._as_tensor(orientations, device=device).reshape(-1, 4)
+        else:
+            orientations_t = None
+
+        if scales is not None:
+            scales_t = self._as_tensor(scales, device=device)
+            if scales_t.ndim == 1:
+                scales_t = scales_t.unsqueeze(-1)
+            scales_t = scales_t.reshape(-1, scales_t.shape[-1])
+            if scales_t.shape[-1] == 1:
+                scales_t = scales_t.repeat(1, 3)
+        else:
+            scales_t = torch.ones((translations_t.shape[0], 3), device=device, dtype=translations_t.dtype)
+
+        marker_cfgs = getattr(self._cfg, "markers", {})
+        marker_name, marker_cfg = next(iter(marker_cfgs.items()), ("point", None))
+        marker_scale = getattr(marker_cfg, "scale", (0.15, 0.15, 0.15))
+        marker_color = self._marker_color(marker_cfg)
+
+        indices = self._iter_selected_indices(translations_t.shape[0])
+        if not indices:
+            return
+
+        if marker_name in ("point", "sphere"):
+            base_radius = float(getattr(marker_cfg, "radius", marker_scale[0] * 0.25))
+            for idx in indices:
+                radius = base_radius * float(scales_t[idx, 0])
+                self._visualizer.add_sphere(
+                    center=translations_t[idx],
+                    radius=radius,
+                    color=marker_color,
+                )
+            return
+
+        if marker_name in ("patch", "cylinder"):
+            base_radius = float(getattr(marker_cfg, "radius", marker_scale[0] * 0.5))
+            base_height = float(getattr(marker_cfg, "height", marker_scale[2]))
+            up_axis = torch.tensor([0.0, 0.0, 1.0], device=device, dtype=translations_t.dtype)
+            for idx in indices:
+                start = translations_t[idx]
+                end = start + up_axis * (base_height * float(scales_t[idx, 2]))
+                self._visualizer.add_cylinder(
+                    start=start,
+                    end=end,
+                    radius=base_radius * float(scales_t[idx, 0]),
+                    color=marker_color,
+                )
+            return
+
+        if marker_name == "arrow":
+            base_length = float(marker_scale[0])
+            base_width = float(marker_scale[1]) * 0.2
+            unit_x = torch.tensor([1.0, 0.0, 0.0], device=device, dtype=translations_t.dtype).unsqueeze(0)
+            for idx in indices:
+                if orientations_t is not None:
+                    direction = math_utils.quat_apply(orientations_t[idx].unsqueeze(0), unit_x).squeeze(0)
+                else:
+                    direction = unit_x.squeeze(0)
+                start = translations_t[idx]
+                end = start + direction * (base_length * float(scales_t[idx, 0]))
+                self._visualizer.add_arrow(
+                    start=start,
+                    end=end,
+                    color=marker_color,
+                    width=base_width,
+                )
+            return
+
+        # Default "pose"/"frame" behavior.
+        if orientations_t is None:
+            orientations_t = torch.zeros((translations_t.shape[0], 4), device=device, dtype=translations_t.dtype)
+            orientations_t[:, 0] = 1.0
+        rot_mats = math_utils.matrix_from_quat(orientations_t)
+        base_frame_scale = float(marker_scale[0])
+        for idx in indices:
+            self._visualizer.add_frame(
+                position=translations_t[idx],
+                rotation_matrix=rot_mats[idx],
+                scale=base_frame_scale * float(scales_t[idx, 0]),
+            )
 
 
 class ShadowingCommandBase(CommandTerm):
@@ -129,8 +271,6 @@ class ShadowingCommandBase(CommandTerm):
             env_ids = self._motion_reference_updated_env_ids
         if len(env_ids) > 0:
             self._update_command_by_env_ids(env_ids)
-        if getattr(self, "_visualizer", None) is not None:
-            self._compute_debug_vis_data()
 
     def reset(self, env_ids: Sequence[int] | None = None):
         """Reset the command term for the given environment indices."""
@@ -144,10 +284,12 @@ class ShadowingCommandBase(CommandTerm):
     def _debug_vis_callback(self, event):
         pass
 
-    def _set_debug_vis_impl(self, debug_vis: bool):
-        del debug_vis
-        # Legacy IsaacLab marker pipeline removed in mjlab-native mode.
-        return
+    def _debug_vis_impl(self, visualizer: "DebugVisualizer") -> None:
+        if getattr(self.cfg, "visualizer_cfg", None) is None:
+            return
+        self._visualizer = _MjlabMarkerVisualizer(visualizer, self.cfg.visualizer_cfg, self.num_envs)
+        self._compute_debug_vis_data()
+        self._debug_vis_callback(None)
 
     def _compute_debug_vis_data(self):
         """Compute and update the data for visualization."""
@@ -597,8 +739,10 @@ class ProjectedGravityRefCommand(ShadowingCommandBase):
         """
         # initialize the base class
         super().__init__(cfg, env)
-        # NOTE: mjlab uses (0, 0, -9.81) as default gravity; read from sim cfg.
-        gravity = torch.tensor(sim_utils.SimulationCfg().gravity, device=self.device)
+        gravity = env.sim.model.opt.gravity
+        if gravity.ndim == 2:
+            gravity = gravity[0]
+        gravity = torch.as_tensor(gravity, device=self.device, dtype=torch.float)
         # Convert to direction vector
         gravity_dir = math_utils.normalize(gravity.unsqueeze(0)).squeeze(0)
         self.GRAVITY_VEC_W = math_utils.normalize(
@@ -1020,7 +1164,7 @@ class BaseLinVelRefCommand(ShadowingCommandBase):
         self._command[env_ids] *= self._mask[env_ids]
         if self.cfg.current_state_command:
             self._current_state[env_ids] = (
-                self._env.scene[self.cfg.asset_cfg.name].data.root_lin_vel_b[env_ids].unsqueeze(1)
+                self._env.scene[self.cfg.asset_cfg.name].data.root_link_lin_vel_b[env_ids].unsqueeze(1)
             )
 
 

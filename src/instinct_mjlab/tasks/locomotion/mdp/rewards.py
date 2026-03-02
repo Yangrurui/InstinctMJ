@@ -109,23 +109,26 @@ def feet_slide(
   sensor_name: str,
   asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
   threshold: float = 0.1,
+  ang_vel_penalty: bool = False,
 ) -> torch.Tensor:
-  """Penalize foot sliding speed while feet are in contact."""
+  """Penalize body sliding while in contact (InstinctLab-equivalent)."""
   asset: Entity = env.scene[asset_cfg.name]
   sensor: ContactSensor = env.scene[sensor_name]
 
-  found = sensor.data.found
-  assert found is not None
-
-  if found.ndim == 3:
-    in_contact = torch.any(found > 0, dim=-1)
+  force_history = sensor.data.force_history
+  if force_history is not None:
+    in_contact = torch.max(torch.linalg.vector_norm(force_history, dim=-1), dim=2)[0] > threshold
   else:
-    in_contact = found > 0
+    force = sensor.data.force
+    assert force is not None
+    in_contact = torch.linalg.vector_norm(force, dim=-1) > threshold
 
-  foot_vel_xy = asset.data.body_link_lin_vel_w[:, asset_cfg.body_ids, :2]
-  slip_speed = torch.norm(foot_vel_xy, dim=-1)
-  slip_penalty = torch.clamp(slip_speed - threshold, min=0.0)
-  return torch.sum(slip_penalty * in_contact.float(), dim=1)
+  body_vel = asset.data.body_link_lin_vel_w[:, asset_cfg.body_ids, :2]
+  reward = torch.sum(torch.norm(body_vel, dim=-1) * in_contact.float(), dim=1)
+  if ang_vel_penalty:
+    body_ang_vel = asset.data.body_link_ang_vel_w[:, asset_cfg.body_ids, :2]
+    reward = reward + torch.sum(torch.norm(body_ang_vel, dim=-1) * in_contact.float(), dim=1)
+  return reward
 
 
 def joint_deviation_l1(

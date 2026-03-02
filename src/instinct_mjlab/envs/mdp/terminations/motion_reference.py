@@ -64,7 +64,7 @@ def pos_far_from_ref(
 
 class joint_pos_far_from_ref(ManagerTermBase):
     def __init__(self, cfg, env):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self.exclude_joint_indices = []
         if cfg.params.get("exclude_joint_names", []):
             robot_asset: Entity = env.scene[cfg.params["asset_cfg"].name]

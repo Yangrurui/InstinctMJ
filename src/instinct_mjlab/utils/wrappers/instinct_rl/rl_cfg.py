@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field
 from typing import Literal, Sequence
 
 from instinct_mjlab.utils.wrappers.instinct_rl.module_cfg import InstinctRlParallelBlockCfg
@@ -10,16 +10,16 @@ class InstinctRlActorCriticCfg:
     class_name: str = "ActorCritic"
     """The policy class name. Default is ActorCritic."""
 
-    init_noise_std: float = None
+    init_noise_std: float = MISSING
     """The initial noise standard deviation for the policy."""
 
-    actor_hidden_dims: list[int] = None
+    actor_hidden_dims: list[int] = MISSING
     """The hidden dimensions of the actor network."""
 
-    critic_hidden_dims: list[int] = None
+    critic_hidden_dims: list[int] = MISSING
     """The hidden dimensions of the critic network."""
 
-    activation: str = None
+    activation: str = MISSING
     """The activation function for the actor and critic networks."""
 
 @dataclass(kw_only=True)
@@ -40,7 +40,7 @@ class InstinctRlActorCriticRecurrentCfg(InstinctRlActorCriticCfg):
 
 @dataclass(kw_only=True)
 class EncoderCfgMixin:
-    encoder_configs: object = None
+    encoder_configs: object = MISSING
     """ A dataclass containing InstinctRlEncoderCfg.
     """
 
@@ -52,13 +52,13 @@ class EncoderCfgMixin:
 class EstimatorCfgMixin:
     """Mixin for state estimator."""
 
-    estimator_obs_components: list[str] = None
+    estimator_obs_components: list[str] = MISSING
     """The components of the observation used for the estimator."""
 
-    estimator_target_components: list[str] = None
+    estimator_target_components: list[str] = MISSING
     """The components of the observation used as the target for the estimator."""
 
-    estimator_configs: object = None
+    estimator_configs: object = MISSING
     """A dataclass containing GalaxeaRlEncoderCfg for building the estimator."""
 
     replace_state_prob: float = 1.0
@@ -97,10 +97,10 @@ class InstinctRlMoEActorCriticCfg(InstinctRlActorCriticCfg):
 class InstinctRlVaeActorCriticCfg(InstinctRlActorCriticCfg):
     class_name: str = "VaeActor"
 
-    vae_encoder_kwargs: dict = None
+    vae_encoder_kwargs: dict = MISSING
     """ A dict building the MLP-based VAE encoder."""
 
-    vae_decoder_kwargs: dict = None
+    vae_decoder_kwargs: dict = MISSING
     """ A dict building the MLP-based VAE decoder."""
 
     vae_latent_size: int = 16
@@ -162,46 +162,46 @@ class InstinctRlPpoAlgorithmCfg:
     class_name: str = "PPO"
     """The algorithm class name. Default is PPO."""
 
-    value_loss_coef: float = None
+    value_loss_coef: float = MISSING
     """The coefficient for the value loss."""
 
-    use_clipped_value_loss: bool = None
+    use_clipped_value_loss: bool = MISSING
     """Whether to use clipped value loss."""
 
-    clip_param: float = None
+    clip_param: float = MISSING
     """The clipping parameter for the policy."""
 
-    entropy_coef: float = None
+    entropy_coef: float = MISSING
     """The coefficient for the entropy loss."""
 
-    num_learning_epochs: int = None
+    num_learning_epochs: int = MISSING
     """The number of learning epochs per update."""
 
-    num_mini_batches: int = None
+    num_mini_batches: int = MISSING
     """The number of mini-batches per update."""
 
-    learning_rate: float = None
+    learning_rate: float = MISSING
     """The learning rate for the policy."""
 
     optimizer_class_name: str = "AdamW"
     """The optimizer class name. Default is AdamW."""
 
-    schedule: str = None
+    schedule: str = MISSING
     """The learning rate schedule."""
 
-    gamma: float = None
+    gamma: float = MISSING
     """The discount factor."""
 
-    lam: float = None
+    lam: float = MISSING
     """The lambda parameter for Generalized Advantage Estimation (GAE)."""
 
     advantage_mixing_weights: float | Sequence[float] = 1.0
     """The weights for the mixing advantages and compute surrogate loss when multiple rewards are returned."""
 
-    desired_kl: float = None
+    desired_kl: float = MISSING
     """The desired KL divergence."""
 
-    max_grad_norm: float = None
+    max_grad_norm: float = MISSING
     """The maximum gradient norm."""
 
     clip_min_std: float = 1e-12
@@ -223,10 +223,10 @@ class InstinctRlOnPolicyRunnerCfg:
     device: str = "cuda:0"
     """The device for the rl-agent. Default is cuda:0."""
 
-    num_steps_per_env: int = None
+    num_steps_per_env: int = MISSING
     """The number of steps per environment per update."""
 
-    max_iterations: int = None
+    max_iterations: int = MISSING
     """The maximum number of iterations."""
 
     ckpt_manipulator: str | None = None
@@ -235,10 +235,10 @@ class InstinctRlOnPolicyRunnerCfg:
     model. Default is None for no manipulation.
     """
 
-    policy: InstinctRlActorCriticCfg = None
+    policy: InstinctRlActorCriticCfg = MISSING
     """The policy configuration."""
 
-    algorithm: InstinctRlPpoAlgorithmCfg = None
+    algorithm: InstinctRlPpoAlgorithmCfg = MISSING
     """The algorithm configuration."""
 
     normalizers: dict = field(default_factory=dict)
@@ -250,13 +250,13 @@ class InstinctRlOnPolicyRunnerCfg:
     # Checkpointing parameters
     ##
 
-    save_interval: int = None
+    save_interval: int = MISSING
     """The number of iterations between saves."""
 
     log_interval: int = 1
     """The number of iterations between logs."""
 
-    experiment_name: str = None
+    experiment_name: str = MISSING
     """The experiment name."""
 
     run_name: str = ""

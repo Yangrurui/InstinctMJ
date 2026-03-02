@@ -268,8 +268,8 @@ class GroupedRayCasterCamera(GroupedRayCaster):
         - :obj:`"ros"`    - forward axis: +Z - up axis -Y - Offset is applied in the ROS convention
         - :obj:`"world"`  - forward axis: +X - up axis +Z - Offset is applied in the World Frame convention
 
-        See :meth:`isaaclab.utils.maths.convert_camera_frame_orientation_convention` for more details
-        on the conventions.
+        See :func:`convert_orientation_convention` for more details on these
+        conventions.
 
         Args:
             positions: The cartesian coordinates (in meters). Shape is (N, 3).
@@ -509,8 +509,8 @@ class GroupedRayCasterCamera(GroupedRayCaster):
             raise ValueError(
                 f"GroupedRayCasterCamera class does not support the following sensor types: {common_elements}."
                 "\n\tThis is because these sensor types cannot be obtained in a fast way using ''warp''."
-                "\n\tHint: If you need to work with these sensor types, we recommend using the USD camera"
-                " interface from the isaaclab.sensors.camera module."
+                "\n\tHint: If you need to work with these sensor types, use a full USD camera sensor"
+                " backend instead of the grouped ray-caster path."
             )
 
     def _create_buffers(self):

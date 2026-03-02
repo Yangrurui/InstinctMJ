@@ -6,6 +6,13 @@ import torch
 from torch.distributions import Multinomial
 from typing import TYPE_CHECKING, Sequence
 
+from mjlab.actuator import (
+    BuiltinPositionActuator,
+    BuiltinVelocityActuator,
+    XmlPositionActuator,
+    XmlVelocityActuator,
+)
+from mjlab.actuator.actuator import TransmissionType
 from mjlab.utils.lab_api import math as math_utils
 from mjlab.managers import SceneEntityCfg
 
@@ -28,6 +35,46 @@ if TYPE_CHECKING:
     from instinct_mjlab.motion_reference import MotionReferenceManager
 
     from .monitor_cfg import MonitorTermCfg, TorqueMonitorSensorCfg
+
+
+_NON_EFFORT_CTRL_ACTUATOR_TYPES = (
+    BuiltinPositionActuator,
+    BuiltinVelocityActuator,
+    XmlPositionActuator,
+    XmlVelocityActuator,
+)
+
+
+def _joint_torque_monitor_values(asset: Entity) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build joint-wise applied/computed torque buffers from actuator-space data."""
+    joint_applied_torque = torch.zeros_like(asset.data.joint_pos)
+    joint_computed_torque = torch.zeros_like(asset.data.joint_pos)
+
+    if len(asset.actuators) == 0:
+        return joint_applied_torque, joint_computed_torque
+
+    local_ctrl = asset.data.data.ctrl[:, asset.indexing.ctrl_ids]
+    local_actuator_force = asset.data.actuator_force
+
+    for actuator in asset.actuators:
+        if actuator.transmission_type != TransmissionType.JOINT:
+            continue
+
+        applied_values = local_actuator_force[:, actuator.ctrl_ids]
+        ctrl_type_actuator = actuator
+        while hasattr(ctrl_type_actuator, "base_actuator"):
+            ctrl_type_actuator = ctrl_type_actuator.base_actuator
+
+        if isinstance(ctrl_type_actuator, _NON_EFFORT_CTRL_ACTUATOR_TYPES):
+            # Position/velocity actuator ctrl is not torque; use simulated force.
+            computed_values = applied_values
+        else:
+            computed_values = local_ctrl[:, actuator.ctrl_ids]
+
+        joint_applied_torque[:, actuator.target_ids] += applied_values
+        joint_computed_torque[:, actuator.target_ids] += computed_values
+
+    return joint_applied_torque, joint_computed_torque
 
 
 class TorqueMonitorSensor(MonitorSensor):
@@ -119,8 +166,9 @@ class JointStatMonitorTerm(MonitorTerm):
 
     def update(self, dt: float):
         asset = self._env.scene[self.cfg.params["asset_cfg"].name]
+        _, joint_computed_torque = _joint_torque_monitor_values(asset)
         self._computed_torque_max[:] = (
-            torch.abs(asset.data.computed_torque[:, self.cfg.params["asset_cfg"].joint_ids]).max(dim=-1).values
+            torch.abs(joint_computed_torque[:, self.cfg.params["asset_cfg"].joint_ids]).max(dim=-1).values
         )
         self._joint_acc[:] = (
             torch.abs(asset.data.joint_vel[:, self.cfg.params["asset_cfg"].joint_ids] - self._last_joint_vel).mean(
@@ -224,11 +272,10 @@ class ActuatorMonitorTerm(MonitorTerm):
 
     def update(self, dt: float):
         """Update the monitor term."""
+        joint_applied_torque, joint_computed_torque = _joint_torque_monitor_values(self.asset)
         self._joint_pos_cmd[:] = self.asset.data.joint_pos_target[:, self.asset_joint_ids].mean(dim=-1)
-        # mjlab uses actuator_force instead of applied_torque and doesn't expose computed_torque
-        self._applied_torque[:] = self.asset.data.actuator_force[:, self.asset_joint_ids].mean(dim=-1)
-        # computed_torque is not available in mjlab, set to zero
-        self._computed_torque[:] = 0.0
+        self._applied_torque[:] = joint_applied_torque[:, self.asset_joint_ids].mean(dim=-1)
+        self._computed_torque[:] = joint_computed_torque[:, self.asset_joint_ids].mean(dim=-1)
         self._joint_pos_skeleton[:] = self.asset.data.joint_pos[:, self.asset_joint_ids].mean(dim=-1)
         self._joint_vel[:] = self.asset.data.joint_vel[:, self.asset_joint_ids].mean(dim=-1)
         self._joint_power[:] = (self._applied_torque * self._joint_vel).mean(dim=-1)
@@ -277,24 +324,24 @@ class BodyStatMonitorTerm(MonitorTerm):
         asset = self._env.scene[self.cfg.params["asset_cfg"].name]
         self._body_acc[:] = (
             torch.norm(
-                asset.data.body_vel_w[:, self.cfg.params["asset_cfg"].body_ids] - self._last_body_vel, dim=-1
+                asset.data.body_link_vel_w[:, self.cfg.params["asset_cfg"].body_ids] - self._last_body_vel, dim=-1
             ).mean(dim=-1)
             / dt
         )
         self._body_acc_max[:] = (
-            torch.norm(asset.data.body_vel_w[:, self.cfg.params["asset_cfg"].body_ids] - self._last_body_vel, dim=-1)
+            torch.norm(asset.data.body_link_vel_w[:, self.cfg.params["asset_cfg"].body_ids] - self._last_body_vel, dim=-1)
             .max(dim=-1)
             .values
             / dt
         )
-        self._body_vel[:] = torch.norm(asset.data.body_vel_w[:, self.cfg.params["asset_cfg"].body_ids], dim=-1).mean(
+        self._body_vel[:] = torch.norm(asset.data.body_link_vel_w[:, self.cfg.params["asset_cfg"].body_ids], dim=-1).mean(
             dim=-1
         )
         self._body_vel_max[:] = (
-            torch.norm(asset.data.body_vel_w[:, self.cfg.params["asset_cfg"].body_ids], dim=-1).max(dim=-1).values
+            torch.norm(asset.data.body_link_vel_w[:, self.cfg.params["asset_cfg"].body_ids], dim=-1).max(dim=-1).values
         )
 
-        self._last_body_vel = asset.data.body_vel_w[:, self.cfg.params["asset_cfg"].body_ids].detach().clone()
+        self._last_body_vel = asset.data.body_link_vel_w[:, self.cfg.params["asset_cfg"].body_ids].detach().clone()
 
     def reset_idx(self, env_ids: Sequence[int] | slice):
         """Nothing to do here."""

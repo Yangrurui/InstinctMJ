@@ -3,10 +3,14 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import atexit
 from dataclasses import asdict
 import os
+import select
 import subprocess
 import sys
+import termios
+import tty
 
 sys.path.append(os.path.join(os.getcwd(), "scripts", "instinct_rl"))
 
@@ -56,9 +60,6 @@ simulation_app = app_launcher.app
 import gymnasium as gym
 import torch
 
-import carb.input
-import omni.appwindow
-from carb.input import KeyboardEventType
 from instinct_rl.runners import OnPolicyRunner
 from instinct_rl.utils.utils import get_obs_slice, get_subobs_by_components, get_subobs_size
 
@@ -204,27 +205,34 @@ def main():
     override_command = torch.zeros(env.num_envs, 3, device=env.device)
     command_obs_slice = get_obs_slice(env.get_obs_segments(), "velocity_commands")
 
-    def on_keyboard_input(e):
-        if e.input == carb.input.KeyboardInput.W:
-            if e.type == KeyboardEventType.KEY_PRESS or e.type == KeyboardEventType.KEY_REPEAT:
-                override_command[:, 0] += args_cli.keyboard_linvel_step
-        if e.input == carb.input.KeyboardInput.S:
-            if e.type == KeyboardEventType.KEY_PRESS or e.type == KeyboardEventType.KEY_REPEAT:
-                override_command[:, 2] = 0.0
-        if e.input == carb.input.KeyboardInput.F:
-            if e.type == KeyboardEventType.KEY_PRESS or e.type == KeyboardEventType.KEY_REPEAT:
-                override_command[:, 2] = args_cli.keyboard_angvel
-        if e.input == carb.input.KeyboardInput.G:
-            if e.type == KeyboardEventType.KEY_PRESS or e.type == KeyboardEventType.KEY_REPEAT:
-                override_command[:, 2] = -args_cli.keyboard_angvel
-        if e.input == carb.input.KeyboardInput.X:
-            if e.type == KeyboardEventType.KEY_PRESS or e.type == KeyboardEventType.KEY_REPEAT:
-                override_command[:] = 0.0
+    if args_cli.keyboard_control:
+        if not sys.stdin.isatty():
+            raise RuntimeError(
+                "--keyboard_control requires an interactive terminal (TTY) in Instinct_mjlab play.py."
+            )
 
-    app_window = omni.appwindow.get_default_app_window()
-    keyboard = app_window.get_keyboard()
-    input = carb.input.acquire_input_interface()
-    input.subscribe_to_keyboard_events(keyboard, on_keyboard_input)
+        stdin_fd = sys.stdin.fileno()
+        terminal_state = termios.tcgetattr(stdin_fd)
+        tty.setcbreak(stdin_fd)
+
+        def _restore_terminal():
+            termios.tcsetattr(stdin_fd, termios.TCSADRAIN, terminal_state)
+
+        atexit.register(_restore_terminal)
+
+        def poll_keyboard_input():
+            while select.select([sys.stdin], [], [], 0.0)[0]:
+                key = sys.stdin.read(1).lower()
+                if key == "w":
+                    override_command[:, 0] += args_cli.keyboard_linvel_step
+                elif key == "s":
+                    override_command[:, 2] = 0.0
+                elif key == "f":
+                    override_command[:, 2] = args_cli.keyboard_angvel
+                elif key == "g":
+                    override_command[:, 2] = -args_cli.keyboard_angvel
+                elif key == "x":
+                    override_command[:] = 0.0
 
     # reset environment
     obs, _ = env.get_observations()
@@ -235,6 +243,7 @@ def main():
         with torch.inference_mode():
             # agent stepping
             if args_cli.keyboard_control:
+                poll_keyboard_input()
                 obs[:, command_obs_slice[0]] = override_command.repeat(1, command_obs_slice[1][0] // 3)
             actions = policy(obs)
             if args_cli.useonnx:

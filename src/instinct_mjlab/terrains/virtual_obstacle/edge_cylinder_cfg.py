@@ -96,7 +96,7 @@ class GreedyconcatEdgeCylinderCfg(EdgeCylinderCfg):
     adjacent_angle_threshold: float = 30.0
     """The angle threshold to consider two edges as adjacent."""
 
-    point_distance_threshold: float = 0.05
+    point_distance_threshold: float = 0.06
     """The distance threshold to consider a point as an inlier."""
 
     min_points: int = 5

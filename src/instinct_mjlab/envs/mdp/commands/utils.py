@@ -127,7 +127,7 @@ def get_link_rot_diff_mag_to_cmd(
     link_indices = links[0]
 
     # obtain the link rotation of the robot
-    link_rot = asset.data.body_quat_w  # (batch_size, num_all_links, 4)
+    link_rot = asset.data.body_link_quat_w  # (batch_size, num_all_links, 4)
     link_rot = link_rot[:, link_indices, :]  # (batch_size, num_links, 4)
     # obtain the reference link rotation from the command
     ref_link_rot = command_term.command[command_term.ALL_INDICES, command_term.aiming_frame_idx]

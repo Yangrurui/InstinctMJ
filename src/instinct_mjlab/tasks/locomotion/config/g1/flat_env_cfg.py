@@ -201,10 +201,13 @@ def _rewards_cfg() -> dict[str, RewTerm]:
       },
     ),
     "feet_slide": RewTerm(
-      func=locomotion_mdp.feet_slide,
+      func=instinct_mdp.contact_slide,
       weight=-0.1,
       params={
-        "sensor_name": _FEET_CONTACT_SENSOR_NAME,
+        "sensor_cfg": SceneEntityCfg(
+          _FEET_CONTACT_SENSOR_NAME,
+          body_names=("left_ankle_roll_link", "right_ankle_roll_link"),
+        ),
         "asset_cfg": SceneEntityCfg(
           "robot",
           body_names=("left_ankle_roll_link", "right_ankle_roll_link"),

@@ -1,17 +1,17 @@
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field
 from typing import List, Literal, Sequence
 
 @dataclass(kw_only=True)
 class InstinctRlParallelBlockCfg:
     """Configuration for the encoder network."""
 
-    class_name: str = None
+    class_name: str = MISSING
     """The encoder class name. Default is Encoder."""
 
-    component_names: List[str] = None
+    component_names: List[str] = MISSING
     """The names of the observation components to be embedded."""
 
-    output_size: int = None
+    output_size: int = MISSING
     """The output size of the encoder network."""
 
     takeout_input_components: bool = True
@@ -24,10 +24,10 @@ class InstinctRlMlpCfg(InstinctRlParallelBlockCfg):
     class_name: str = "MlpModel"
     """The encoder class name. Default is MlpModel."""
 
-    hidden_sizes: List[int] = None
+    hidden_sizes: List[int] = MISSING
     """The hidden dimensions of the encoder network."""
 
-    nonlinearity: str = None
+    nonlinearity: str = MISSING
     """The activation function for the encoder network."""
 
 @dataclass(kw_only=True)
@@ -37,22 +37,22 @@ class InstinctRlConv2dHeadCfg(InstinctRlParallelBlockCfg):
     class_name: str = "Conv2dHeadModel"
     """The encoder class name. Default is Conv2dHeadModel."""
 
-    channels: List[int] = None
+    channels: List[int] = MISSING
     """The number of channels."""
 
-    kernel_sizes: List[int] = None
+    kernel_sizes: List[int] = MISSING
     """The size of the kernel."""
 
-    strides: List[int] = None
+    strides: List[int] = MISSING
     """The stride of the kernel."""
 
-    hidden_sizes: List[int] = None
+    hidden_sizes: List[int] = MISSING
     """The hidden dimensions of the output mlp head."""
 
-    paddings: List[int] = None
+    paddings: List[int] = MISSING
     """The padding of the kernel."""
 
-    nonlinearity: str = None
+    nonlinearity: str = MISSING
     """The activation function for the encoder network."""
 
     use_maxpool: bool = False

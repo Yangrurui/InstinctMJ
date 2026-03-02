@@ -4,8 +4,6 @@ import torch
 from prettytable import PrettyTable
 from typing import TYPE_CHECKING, Sequence
 
-import omni.physics.tensors.impl.api as physx
-
 from mjlab.envs.mdp import joint_pos_rel
 from mjlab.managers import ManagerTermBase, ObservationTermCfg, SceneEntityCfg
 from mjlab.utils.lab_api import math as math_utils
@@ -64,7 +62,7 @@ class link_pos_reference_masked(ManagerTermBase):
     """Get link position in the robot base frame, but masked by the reference frame mask."""
 
     def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self.reference_cfg: SceneEntityCfg = cfg.params.get("reference_cfg", SceneEntityCfg("motion_reference"))
         self.motion_reference: MotionReferenceManager = env.scene[self.reference_cfg.name]
         self.asset_cfg: SceneEntityCfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))

@@ -19,7 +19,7 @@ class base_pos_offset_since_motion_refresh(ManagerTermBase):
     """
 
     def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         reference_cfg = cfg.params.get("reference_cfg", SceneEntityCfg("motion_reference"))
         self.motion_reference = env.scene[reference_cfg.name]
         asset_cfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))

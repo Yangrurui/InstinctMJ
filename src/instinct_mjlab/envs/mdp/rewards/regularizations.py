@@ -3,6 +3,13 @@ from __future__ import annotations
 import torch
 from typing import TYPE_CHECKING, Sequence
 
+from mjlab.actuator import (
+    BuiltinPositionActuator,
+    BuiltinVelocityActuator,
+    XmlPositionActuator,
+    XmlVelocityActuator,
+)
+from mjlab.actuator.actuator import TransmissionType
 from mjlab.managers import ManagerTermBase, SceneEntityCfg
 
 if TYPE_CHECKING:
@@ -16,7 +23,7 @@ class constant_reward(ManagerTermBase):
     """Constant reward term, used for debugging and testing. You may hack and override this term whenever you want to."""
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         asset: Articulation = env.scene[cfg.params.get("asset_cfg", SceneEntityCfg("robot")).name]
         self.reward = torch.ones(asset.num_instances, device=env.device, dtype=torch.float) * cfg.params.get(
             "reward", 0.0
@@ -30,6 +37,81 @@ class constant_reward(ManagerTermBase):
         return self.reward
 
 
+_NON_EFFORT_CTRL_ACTUATOR_TYPES = (
+    BuiltinPositionActuator,
+    BuiltinVelocityActuator,
+    XmlPositionActuator,
+    XmlVelocityActuator,
+)
+
+
+def _joint_applied_and_computed_torque(asset: Articulation) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build joint-wise applied/computed torque tensors from actuator-space buffers.
+
+    Matches the InstinctLab semantics where:
+    - applied torque: actually applied actuator effort in simulation
+    - computed torque: raw controller effort before clipping for non-effort controllers
+      (for position/velocity-style controllers, ctrl is not torque and we use applied values).
+    """
+    joint_applied_torque = torch.zeros_like(asset.data.joint_pos)
+    joint_computed_torque = torch.zeros_like(asset.data.joint_pos)
+
+    if len(asset.actuators) == 0:
+        return joint_applied_torque, joint_computed_torque
+
+    local_ctrl = asset.data.data.ctrl[:, asset.indexing.ctrl_ids]
+    local_actuator_force = asset.data.actuator_force
+
+    for actuator in asset.actuators:
+        if actuator.transmission_type != TransmissionType.JOINT:
+            continue
+
+        applied_values = local_actuator_force[:, actuator.ctrl_ids]
+
+        ctrl_type_actuator = actuator
+        while hasattr(ctrl_type_actuator, "base_actuator"):
+            ctrl_type_actuator = ctrl_type_actuator.base_actuator
+
+        if isinstance(ctrl_type_actuator, _NON_EFFORT_CTRL_ACTUATOR_TYPES):
+            computed_values = applied_values
+        else:
+            computed_values = local_ctrl[:, actuator.ctrl_ids]
+
+        joint_applied_torque[:, actuator.target_ids] += applied_values
+        joint_computed_torque[:, actuator.target_ids] += computed_values
+
+    return joint_applied_torque, joint_computed_torque
+
+
+def _body_lin_acc_w(
+    env: ManagerBasedRLEnv,
+    asset: Articulation,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Compute body linear acceleration from step-to-step link linear velocity."""
+    body_lin_vel_w = asset.data.body_link_lin_vel_w[:, asset_cfg.body_ids, :]
+    acc_cache_name = f"_instinct_body_lin_acc_w_{asset_cfg.name}"
+    acc_step_cache_name = f"_instinct_body_lin_acc_step_{asset_cfg.name}"
+    sim_step = getattr(env, "_sim_step_counter", None)
+    if sim_step is not None and getattr(env, acc_step_cache_name, None) == sim_step:
+        cached_body_lin_acc_w = getattr(env, acc_cache_name, None)
+        if cached_body_lin_acc_w is not None and cached_body_lin_acc_w.shape == body_lin_vel_w.shape:
+            return cached_body_lin_acc_w
+
+    cache_name = f"_instinct_prev_body_lin_vel_w_{asset_cfg.name}"
+    prev_body_lin_vel_w = getattr(env, cache_name, None)
+    if prev_body_lin_vel_w is None or prev_body_lin_vel_w.shape != body_lin_vel_w.shape:
+        body_lin_acc_w = torch.zeros_like(body_lin_vel_w)
+    else:
+        body_lin_acc_w = (body_lin_vel_w - prev_body_lin_vel_w) / env.step_dt
+    body_lin_acc_w[env.episode_length_buf <= 1] = 0.0
+    setattr(env, cache_name, body_lin_vel_w.detach().clone())
+    setattr(env, acc_cache_name, body_lin_acc_w)
+    if sim_step is not None:
+        setattr(env, acc_step_cache_name, sim_step)
+    return body_lin_acc_w
+
+
 def motors_power_square(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
@@ -37,17 +119,21 @@ def motors_power_square(
     normalize_by_num_joints: bool = False,
 ):
     asset: Articulation = env.scene[asset_cfg.name]
-    # mjlab uses actuator_force instead of applied_torque
-    power_j = asset.data.actuator_force * asset.data.joint_vel  # (batch_size, num_joints)
+    # mjlab exposes actuator-space values; rebuild InstinctLab-style applied torque in joint space.
+    joint_applied_torque, _ = _joint_applied_and_computed_torque(asset)
+    power_j = joint_applied_torque * asset.data.joint_vel  # (batch_size, num_joints)
     if normalize_by_stiffness:
-        # mjlab: asset.actuators is a list, not a dict
         for actuator in asset.actuators:
-            # Handle DelayedActuator wrapper - access base actuator properties
-            base_actuator = getattr(actuator, 'base_actuator', actuator)
+            if actuator.transmission_type != TransmissionType.JOINT:
+                continue
+            base_actuator = getattr(actuator, "base_actuator", actuator)
             target_ids = base_actuator.target_ids
-            stiffness = getattr(base_actuator, 'stiffness', None)
+            stiffness = getattr(base_actuator, "stiffness", None)
             if stiffness is not None:
-                power_j[:, target_ids] /= stiffness
+                if torch.is_tensor(stiffness):
+                    power_j[:, target_ids] /= stiffness.to(device=power_j.device, dtype=power_j.dtype)
+                else:
+                    power_j[:, target_ids] /= float(stiffness)
     power_j = power_j[:, asset_cfg.joint_ids]  # (batch_size, num_selected_joints)
     power = torch.sum(torch.square(power_j), dim=-1)  # (batch_size,)
     if normalize_by_num_joints:
@@ -61,7 +147,7 @@ def body_lin_acc_square(
     normalize_by_num_bodies: bool = False,
 ):
     asset: Articulation = env.scene[asset_cfg.name]
-    bodies_acc = torch.norm(asset.data.body_lin_acc_w[:, asset_cfg.body_ids, :], dim=-1)  # (batch_size, num_bodies)
+    bodies_acc = torch.norm(_body_lin_acc_w(env, asset, asset_cfg), dim=-1)  # (batch_size, num_bodies)
     body_lin_acc_err = torch.square(bodies_acc)  # (batch_size, num_bodies)
     body_lin_acc_err = torch.sum(body_lin_acc_err, dim=-1)  # (batch_size,)
 
@@ -80,7 +166,7 @@ def body_lin_acc_gauss(
     combine_method: str = "prod",
 ):
     asset: Articulation = env.scene[asset_cfg.name]
-    bodies_acc = torch.norm(asset.data.body_lin_acc_w[:, asset_cfg.body_ids, :], dim=-1)  # (batch_size, num_bodies)
+    bodies_acc = torch.norm(_body_lin_acc_w(env, asset, asset_cfg), dim=-1)  # (batch_size, num_bodies)
     if torlerance > 0:
         bodies_acc = torch.clamp(bodies_acc - torlerance, min=0.0)
     body_lin_acc_err = torch.square(bodies_acc)  # (batch_size, num_bodies)
@@ -146,7 +232,7 @@ class action_rate_direction_switch(ManagerTermBase):
     """
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self._last_action = torch.zeros_like(env.action_manager.action)
         self._last_action_direction = torch.zeros_like(env.action_manager.action)  # +1 or -1
         self._action_direction_switch_count = torch.zeros_like(env.action_manager.action, dtype=torch.float)
@@ -189,7 +275,7 @@ class action_rate_direction_consistent(ManagerTermBase):
     """
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self._last_action = torch.zeros_like(env.action_manager.action)
         self._last_action_direction = torch.zeros_like(env.action_manager.action)  # +1 or -1
         self._action_rate_direction_consistency_count = torch.zeros_like(env.action_manager.action, dtype=torch.float)
@@ -262,11 +348,12 @@ class joint_torque_sign_switch(ManagerTermBase):
     """Since policy will seriously jitter and lead to torque sign switch, we need to penalize this behavior."""
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self.asset_cfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
         self.asset = env.scene[self.asset_cfg.name]
-        # mjlab uses actuator_force instead of applied_torque
-        self._last_joint_torque = torch.zeros_like(self.asset.data.actuator_force[:, self.asset_cfg.joint_ids])
+        # mjlab uses actuator-space buffers; keep a joint-space applied torque history for parity.
+        joint_applied_torque, _ = _joint_applied_and_computed_torque(self.asset)
+        self._last_joint_torque = torch.zeros_like(joint_applied_torque[:, self.asset_cfg.joint_ids])
 
     def __call__(
         self,
@@ -274,8 +361,9 @@ class joint_torque_sign_switch(ManagerTermBase):
         asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
         normalize_by_num_joints: bool = False,
     ):
-        # mjlab uses actuator_force instead of applied_torque
-        joint_torque = self.asset.data.actuator_force[:, asset_cfg.joint_ids]
+        # InstinctLab parity: use applied torque in joint space for sign-switch counting.
+        joint_applied_torque, _ = _joint_applied_and_computed_torque(self.asset)
+        joint_torque = joint_applied_torque[:, asset_cfg.joint_ids]
         joint_torque_sign_switch = torch.clip(torch.sign(joint_torque) * torch.sign(-self._last_joint_torque), min=0.0)
 
         joint_torque_sign_switch_err = torch.sum(joint_torque_sign_switch, dim=-1)  # (batch_size,)
@@ -297,17 +385,22 @@ def joint_torques_l2(
 ):
     """Similar implementation as mjlab.envs.mdp.rewards.joint_torques_l2, with more options. The default behavior is the same."""
     asset: Articulation = env.scene[asset_cfg.name]
-    torques = torch.abs(asset.data.actuator_force)
+    # InstinctLab parity: torques are computed in joint space from applied torque.
+    joint_applied_torque, _ = _joint_applied_and_computed_torque(asset)
+    torques = torch.abs(joint_applied_torque)
 
     if normalize_by_stiffness:
-        # mjlab: asset.actuators is a list, not a dict
         for actuator in asset.actuators:
-            # Handle DelayedActuator wrapper - access base actuator properties
-            base_actuator = getattr(actuator, 'base_actuator', actuator)
+            if actuator.transmission_type != TransmissionType.JOINT:
+                continue
+            base_actuator = getattr(actuator, "base_actuator", actuator)
             target_ids = base_actuator.target_ids
-            stiffness = getattr(base_actuator, 'stiffness', None)
+            stiffness = getattr(base_actuator, "stiffness", None)
             if stiffness is not None:
-                torques[:, target_ids] /= stiffness
+                if torch.is_tensor(stiffness):
+                    torques[:, target_ids] /= stiffness.to(device=torques.device, dtype=torques.dtype)
+                else:
+                    torques[:, target_ids] /= float(stiffness)
     torques = torques[:, asset_cfg.joint_ids]
 
     torques = torch.sum(torch.square(torques), dim=-1)
@@ -328,18 +421,22 @@ def joint_torques_gauss(
     normalize_by_num_joints: bool = False,
 ):
     asset: Articulation = env.scene[asset_cfg.name]
-    # mjlab uses actuator_force instead of applied_torque
-    torques = torch.abs(asset.data.actuator_force)
+    # InstinctLab parity: torques are computed in joint space from applied torque.
+    joint_applied_torque, _ = _joint_applied_and_computed_torque(asset)
+    torques = torch.abs(joint_applied_torque)
 
     if normalize_by_stiffness:
-        # mjlab: asset.actuators is a list, not a dict
         for actuator in asset.actuators:
-            # Handle DelayedActuator wrapper - access base actuator properties
-            base_actuator = getattr(actuator, 'base_actuator', actuator)
+            if actuator.transmission_type != TransmissionType.JOINT:
+                continue
+            base_actuator = getattr(actuator, "base_actuator", actuator)
             target_ids = base_actuator.target_ids
-            stiffness = getattr(base_actuator, 'stiffness', None)
+            stiffness = getattr(base_actuator, "stiffness", None)
             if stiffness is not None:
-                torques[:, target_ids] /= stiffness
+                if torch.is_tensor(stiffness):
+                    torques[:, target_ids] /= stiffness.to(device=torques.device, dtype=torques.dtype)
+                else:
+                    torques[:, target_ids] /= float(stiffness)
     torques = torques[:, asset_cfg.joint_ids]
 
     if torlerance > 0:
@@ -365,13 +462,15 @@ class joint_torques_direction_switch(ManagerTermBase):
     """Reward term for counting the joint torques changes when the torque direction changes."""
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self.asset_cfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
         self.asset = env.scene[self.asset_cfg.name]
-        # mjlab uses actuator_force instead of applied_torque
-        self._last_torque_direction = torch.sign(self.asset.data.actuator_force[:, self.asset_cfg.joint_ids])
+        # Track joint-space applied torque direction (InstinctLab semantics).
+        joint_applied_torque, _ = _joint_applied_and_computed_torque(self.asset)
+        selected_joint_torque = joint_applied_torque[:, self.asset_cfg.joint_ids]
+        self._last_torque_direction = torch.sign(selected_joint_torque)
         self._torque_direction_switch_count = torch.zeros_like(
-            self.asset.data.actuator_force[:, self.asset_cfg.joint_ids], dtype=torch.float
+            selected_joint_torque, dtype=torch.float
         )  # (batch_size, num_joints)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
@@ -389,8 +488,9 @@ class joint_torques_direction_switch(ManagerTermBase):
         Args:
             mask: If True, the error will be masked by the current direction switch mask
         """
-        # mjlab uses actuator_force instead of applied_torque
-        joint_torque = self.asset.data.actuator_force[:, self.asset_cfg.joint_ids]
+        # InstinctLab parity: direction switch is evaluated from applied torque in joint space.
+        joint_applied_torque, _ = _joint_applied_and_computed_torque(self.asset)
+        joint_torque = joint_applied_torque[:, self.asset_cfg.joint_ids]
         joint_torque_direction = torch.sign(joint_torque)
         direction_switch = joint_torque_direction != self._last_torque_direction
 
@@ -419,7 +519,7 @@ class joint_acc_l2_step(ManagerTermBase):
     """
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self.asset = env.scene[cfg.params.get("asset_cfg", SceneEntityCfg("robot")).name]
         self._last_joint_vel = torch.zeros_like(self.asset.data.joint_vel)
 
@@ -480,7 +580,7 @@ class joint_acc_gauss_step(ManagerTermBase):
     """
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self.asset = env.scene[cfg.params.get("asset_cfg", SceneEntityCfg("robot")).name]
         self._last_joint_vel = torch.zeros_like(self.asset.data.joint_vel)
 
@@ -526,7 +626,7 @@ class joint_acc_direction_switch(ManagerTermBase):
     """
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self.asset_cfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
         self.asset: Articulation = env.scene[self.asset_cfg.name]
         self._last_vel = torch.zeros_like(self.asset.data.joint_vel[:, self.asset_cfg.joint_ids])
@@ -606,7 +706,7 @@ class joint_vel_direction_switch(ManagerTermBase):
     """
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self.asset_cfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
         self.asset: Articulation = env.scene[self.asset_cfg.name]
         self._last_vel_direction = torch.sign(self.asset.data.joint_vel[:, self.asset_cfg.joint_ids])
@@ -735,18 +835,22 @@ def applied_torque_limits_gauss(
 ):
     # extract the used quantities (to enable type-hinting)
     asset: Articulation = env.scene[asset_cfg.name]
-    # mjlab uses actuator_force and doesn't expose computed_torque
-    # We penalize the absolute actuator force directly
-    out_of_limits = torch.abs(asset.data.actuator_force)
+    # InstinctLab parity: out-of-limit signal is |applied_torque - computed_torque| in joint space.
+    applied_torque, computed_torque = _joint_applied_and_computed_torque(asset)
+    out_of_limits = torch.abs(applied_torque - computed_torque)
+
     if normalize_by_stiffness:
-        # mjlab: asset.actuators is a list, not a dict
         for actuator in asset.actuators:
-            # Handle DelayedActuator wrapper - access base actuator properties
+            if actuator.transmission_type != TransmissionType.JOINT:
+                continue
             base_actuator = getattr(actuator, 'base_actuator', actuator)
             target_ids = base_actuator.target_ids
             stiffness = getattr(base_actuator, 'stiffness', None)
             if stiffness is not None:
-                out_of_limits[:, target_ids] /= stiffness
+                if torch.is_tensor(stiffness):
+                    out_of_limits[:, target_ids] /= stiffness.to(device=out_of_limits.device, dtype=out_of_limits.dtype)
+                else:
+                    out_of_limits[:, target_ids] /= float(stiffness)
     out_of_limits = out_of_limits[:, asset_cfg.joint_ids]  # (batch_size, num_selected_joints)
 
     out_of_limits_err = torch.square(out_of_limits)
@@ -773,18 +877,22 @@ def applied_torque_limits_square(
     normalize_by_num_joints: bool = False,
 ):
     asset: Articulation = env.scene[asset_cfg.name]
-    # mjlab uses actuator_force and doesn't expose computed_torque
-    # We penalize the absolute actuator force directly
-    out_of_limits = torch.abs(asset.data.actuator_force)
+    # InstinctLab parity: out-of-limit signal is |applied_torque - computed_torque| in joint space.
+    applied_torque, computed_torque = _joint_applied_and_computed_torque(asset)
+    out_of_limits = torch.abs(applied_torque - computed_torque)
+
     if normalize_by_stiffness:
-        # mjlab: asset.actuators is a list, not a dict
         for actuator in asset.actuators:
-            # Handle DelayedActuator wrapper - access base actuator properties
+            if actuator.transmission_type != TransmissionType.JOINT:
+                continue
             base_actuator = getattr(actuator, 'base_actuator', actuator)
             target_ids = base_actuator.target_ids
             stiffness = getattr(base_actuator, 'stiffness', None)
             if stiffness is not None:
-                out_of_limits[:, target_ids] /= stiffness
+                if torch.is_tensor(stiffness):
+                    out_of_limits[:, target_ids] /= stiffness.to(device=out_of_limits.device, dtype=out_of_limits.dtype)
+                else:
+                    out_of_limits[:, target_ids] /= float(stiffness)
     out_of_limits = out_of_limits[:, asset_cfg.joint_ids]  # (batch_size, num_selected_joints)
 
     out_of_limits_err = torch.sum(torch.square(out_of_limits), dim=-1)  # (batch_size,)
@@ -802,6 +910,12 @@ def applied_torque_limits_by_ratio(
 ):
     """Penalize when the applied torque excceed certain ratio of the joint torque limit."""
     asset: Articulation = env.scene[asset_cfg.name]
+
+    joint_applied_torque, _ = _joint_applied_and_computed_torque(asset)
+    if joint_applied_torque.numel() == 0:
+        return torch.zeros(env.num_envs, device=env.device)
+
+    joint_effort_limits = torch.zeros_like(joint_applied_torque)
     if isinstance(asset_cfg.joint_ids, slice):
         selected_joint_ids = list(range(asset.num_joints))
     else:
@@ -812,29 +926,23 @@ def applied_torque_limits_by_ratio(
     if actuator_forcerange.ndim == 3:
         actuator_forcerange = actuator_forcerange[0]
 
-    actuator_force = asset.data.actuator_force
-    if actuator_force.numel() == 0:
-        return torch.zeros(env.num_envs, device=env.device)
-
-    out_of_limits = []
     for actuator in asset.actuators:
+        if actuator.transmission_type != TransmissionType.JOINT:
+            continue
         target_names = list(actuator.target_names)
-        ctrl_ids_local = actuator.ctrl_ids
         ctrl_ids_global = actuator.global_ctrl_ids
         for idx, joint_name in enumerate(target_names):
             if joint_name not in selected_joint_names:
                 continue
-            ctrl_id_local = int(ctrl_ids_local[idx])
             ctrl_id_global = int(ctrl_ids_global[idx])
+            joint_id = int(actuator.target_ids[idx])
             effort_limit = torch.max(torch.abs(actuator_forcerange[ctrl_id_global]))
-            torque_abs = torch.abs(actuator_force[:, ctrl_id_local])
-            out_of_limits.append(torch.clamp(torque_abs - effort_limit * limit_ratio, min=0.0))
+            joint_effort_limits[:, joint_id] = torch.maximum(joint_effort_limits[:, joint_id], effort_limit)
 
-    if len(out_of_limits) == 0:
-        return torch.zeros(env.num_envs, device=env.device)
-
-    out_of_limits_tensor = torch.stack(out_of_limits, dim=-1)
-    out_of_limits_err = torch.sum(torch.square(out_of_limits_tensor), dim=-1)  # (num_envs,)
+    selected_effort_limits = joint_effort_limits[:, asset_cfg.joint_ids]
+    selected_applied_torque = torch.abs(joint_applied_torque[:, asset_cfg.joint_ids])
+    out_of_limits = (selected_applied_torque - selected_effort_limits * limit_ratio).clip(min=0.0)
+    out_of_limits_err = torch.sum(torch.square(out_of_limits), dim=-1)  # (num_envs,)
     return out_of_limits_err
 
 
@@ -852,14 +960,28 @@ def contact_slide(
     agent is penalized only when the body are in contact with the ground.
     """
     # Penalize body sliding
-    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    contacts = (
-        contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > threshold
-    )
     asset = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    force_history = contact_sensor.data.force_history
+    if force_history is not None:
+        contacts = torch.max(torch.norm(force_history[:, sensor_cfg.body_ids], dim=-1), dim=-1)[0] > threshold
+    else:
+        force = contact_sensor.data.force
+        if force is None:
+            if isinstance(asset_cfg.body_ids, slice):
+                num_bodies = asset.data.body_link_lin_vel_w.shape[1]
+            else:
+                num_bodies = len(asset_cfg.body_ids)
+            contacts = torch.zeros(
+                (env.num_envs, num_bodies),
+                device=env.device,
+                dtype=torch.bool,
+            )
+        else:
+            contacts = torch.norm(force[:, sensor_cfg.body_ids], dim=-1) > threshold
 
-    body_vel = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2]
-    body_ang_vel = asset.data.body_ang_vel_w[:, asset_cfg.body_ids, :2]
+    body_vel = asset.data.body_link_lin_vel_w[:, asset_cfg.body_ids, :2]
+    body_ang_vel = asset.data.body_link_ang_vel_w[:, asset_cfg.body_ids, :2]
     reward = torch.sum(body_vel.norm(dim=-1) * contacts, dim=1)
     if ang_vel_penalty:
         reward = reward + torch.sum(body_ang_vel.norm(dim=-1) * contacts, dim=1)
@@ -879,13 +1001,27 @@ def contact_rotate(
     agent is penalized only when the body are in contact with a static object.
     """
     # Penalize body rotation
-    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    contacts = (
-        contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > threshold
-    )
     asset = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    force_history = contact_sensor.data.force_history
+    if force_history is not None:
+        contacts = torch.max(torch.norm(force_history[:, sensor_cfg.body_ids], dim=-1), dim=-1)[0] > threshold
+    else:
+        force = contact_sensor.data.force
+        if force is None:
+            if isinstance(asset_cfg.body_ids, slice):
+                num_bodies = asset.data.body_link_ang_vel_w.shape[1]
+            else:
+                num_bodies = len(asset_cfg.body_ids)
+            contacts = torch.zeros(
+                (env.num_envs, num_bodies),
+                device=env.device,
+                dtype=torch.bool,
+            )
+        else:
+            contacts = torch.norm(force[:, sensor_cfg.body_ids], dim=-1) > threshold
 
-    body_ang_vel = asset.data.body_ang_vel_w[:, asset_cfg.body_ids, :2]
+    body_ang_vel = asset.data.body_link_ang_vel_w[:, asset_cfg.body_ids, :2]
     reward = torch.sum(body_ang_vel.norm(dim=-1) * contacts, dim=1)
     return reward
 

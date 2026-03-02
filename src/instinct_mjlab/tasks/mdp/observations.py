@@ -330,9 +330,8 @@ def parkour_amp_reference_joint_vel_rel(
   reference_joint_vel_mask = motion_reference.reference_frame.joint_vel_mask[
     :, 0, joint_ids
   ]
-  return (
-    reference_joint_vel - default_joint_vel[:, joint_ids]
-  ) * reference_joint_vel_mask
+  masked_joint_vel = reference_joint_vel * reference_joint_vel_mask
+  return masked_joint_vel - default_joint_vel[:, joint_ids]
 
 
 def parkour_amp_reference_base_lin_vel(

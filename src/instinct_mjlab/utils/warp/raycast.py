@@ -118,7 +118,7 @@ def raycast_mesh_grouped(
 
     - Each ray and mesh has their own collision group ID.
     - The mesh with collision group ID will be hit by every ray in the space.
-    - This is a extended implementation of the `raycast_mesh` in isaaclab.utils.warp.ops`
+    - This is an extended implementation of the base `raycast_mesh` helper.
 
     ### NOTE
         return_face_id might not work correctly with the current implementation of warp.

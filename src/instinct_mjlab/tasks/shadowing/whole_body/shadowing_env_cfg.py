@@ -174,6 +174,7 @@ def _make_shadowing_undesired_contact_sensor_cfg() -> ContactSensorCfg:
         fields=("found", "force"),
         reduce="netforce",
         num_slots=1,
+        history_length=3,
     )
 
 

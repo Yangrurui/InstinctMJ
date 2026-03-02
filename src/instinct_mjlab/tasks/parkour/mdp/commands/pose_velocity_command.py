@@ -56,6 +56,11 @@ class PoseVelocityCommand(CommandTerm):
         self.metrics["error_vel_yaw"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["tracking_exp_vel_xy"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["tracking_exp_vel_yaw"] = torch.zeros(self.num_envs, device=self.device)
+        # debug ratios to localize "standing still" behavior
+        self.metrics["command_nonzero_ratio"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["target_near_ratio"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["standing_env_ratio"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["random_velocity_env_ratio"] = torch.zeros(self.num_envs, device=self.device)
 
         # obtain the terrain asset
         self.terrain: TerrainImporter = env.scene["terrain"]
@@ -171,6 +176,18 @@ class PoseVelocityCommand(CommandTerm):
         angular_vel_error = torch.square(self.vel_command_b[:, 2] - self.robot.data.root_link_ang_vel_b[:, 2])
         self.metrics["tracking_exp_vel_yaw"] += (
             torch.exp(-angular_vel_error / self.cfg.ang_vel_metrics_std**2) / self._env.max_episode_length
+        )
+        target_vec = self.pos_command_w - self.robot.data.root_link_pos_w[:, :3]
+        target_dist = torch.norm(target_vec[:, :2], dim=1)
+        cmd_lin_norm = torch.norm(self.vel_command_b[:, :2], dim=1)
+        cmd_nonzero = torch.logical_or(cmd_lin_norm > 1e-6, torch.abs(self.vel_command_b[:, 2]) > 1e-6)
+        self.metrics["command_nonzero_ratio"] += cmd_nonzero.float() / self._env.max_episode_length
+        self.metrics["target_near_ratio"] += (
+            (target_dist <= self.cfg.target_dis_threshold).float() / self._env.max_episode_length
+        )
+        self.metrics["standing_env_ratio"] += self.is_standing_env.float() / self._env.max_episode_length
+        self.metrics["random_velocity_env_ratio"] += (
+            self.random_velocity_indices.float() / self._env.max_episode_length
         )
 
     def _resample_command(self, env_ids: Sequence[int]):

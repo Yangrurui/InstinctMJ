@@ -77,7 +77,7 @@ class update_motion_reference_weights_by_delayed_stats(ManagerTermBase):
     """
 
     def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self.delayed_progress = cfg.params.get("init_delayed_progress", 0.0)
         self.experience_length = cfg.params.get("init_experience_length", 0.0)
         self.motion_reference: MotionReferenceManager = env.scene[cfg.params.get("reference_name", "motion_reference")]

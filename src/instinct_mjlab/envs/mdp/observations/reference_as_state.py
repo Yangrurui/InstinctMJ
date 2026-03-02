@@ -3,8 +3,6 @@ from __future__ import annotations
 import torch
 from typing import TYPE_CHECKING, Sequence
 
-import omni.physics.tensors.impl.api as physx
-
 from mjlab.managers import ManagerTermBase, ObservationTermCfg, SceneEntityCfg
 from mjlab.utils.lab_api import math as math_utils
 
@@ -23,7 +21,7 @@ class base_pos_offset_reference_as_state(ManagerTermBase):
     """
 
     def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         asset_cfg = cfg.params.get("asset_cfg", SceneEntityCfg("motion_reference"))
         self.motion_reference: MotionReferenceManager = env.scene[asset_cfg.name]
         self.base_pos_marker = torch.zeros_like(self.motion_reference.reference_frame.base_pos_w[:, 0])  # (num_envs, 3)
@@ -121,19 +119,16 @@ def root_tannorm_reference_as_state(
 
 class projected_gravity_reference_as_state(ManagerTermBase):
     def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
         self.motion_ref: MotionReferenceManager = (
             env.scene[cfg.params["asset_cfg"].name] if "asset_cfg" in cfg.params else env.scene["motion_reference"]
         )
 
-        # Obtain global physics sim view
-        physics_sim_view = physx.create_simulation_view("torch")
-        physics_sim_view.set_subspace_roots("/")
-        gravity = physics_sim_view.get_gravity()
-        # Convert to direction vector
-        gravity_dir = torch.tensor((gravity[0], gravity[1], gravity[2]), device=self.device)
+        gravity = env.sim.model.opt.gravity
+        if gravity.ndim == 2:
+            gravity = gravity[0]
+        gravity_dir = torch.as_tensor(gravity, device=self.device, dtype=torch.float)
         gravity_dir = math_utils.normalize(gravity_dir.unsqueeze(0)).squeeze(0)
-
         self.GRAVITY_VEC_W = gravity_dir.repeat(len(self.motion_ref.ALL_INDICES), 1)
 
     def __call__(

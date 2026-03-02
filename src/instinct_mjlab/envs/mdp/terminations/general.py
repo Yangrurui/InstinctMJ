@@ -92,7 +92,7 @@ def abnormal_lin_vel(
     max_value: float = 40.0,  # [m/s]
 ):
     asset = env.scene[asset_cfg.name]
-    return torch.norm(asset.data.root_lin_vel_w, dim=-1) > max_value
+    return torch.norm(asset.data.root_link_lin_vel_w, dim=-1) > max_value
 
 
 def abnormal_ang_vel(
@@ -101,7 +101,7 @@ def abnormal_ang_vel(
     max_value: float = 40.0,  # [rad/s]
 ):
     asset = env.scene[asset_cfg.name]
-    return torch.norm(asset.data.root_ang_vel_w, dim=-1) > max_value
+    return torch.norm(asset.data.root_link_ang_vel_w, dim=-1) > max_value
 
 
 def abnormal_joint_vel(

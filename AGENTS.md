@@ -12,6 +12,7 @@
 - 在 `Instinct_mjlab` 内以 mjlab 原生方式复现 InstinctLab 行为。
 - 文件/模块命名在可行范围内尽量贴近原 InstinctLab 结构。
 - 保持本项目可作为 `instinct_rl` 的即插即用组件。
+- 迁移时优先参考 `../mjlab/**` 中相似实现，采用其原生接口与组织方式。
 
 ## 迁移规则
 
@@ -20,8 +21,12 @@
 - 函数迁移按“原版一一对照”执行：原版几个核心函数实现，迁移后默认也保留几个核心函数实现，不额外拆分或合并。
 - 不得以“代码更简洁/更优雅”为由压缩原版实现步骤；应按原版逻辑展开，避免隐藏中间过程。
 - 在不破坏兼容性的前提下可复用原逻辑代码，重点改写为 mjlab 可接受的表达方式。
+- 禁止新增兼容层/桥接层（compat layer、adapter shim、过渡包装）。
+- 兜底逻辑必须与源任务一致：源任务有则保留，源任务无则禁止新增。
 - reward 必须改为 mjlab reward-term 表达；其他 manager 若存在表达差异，也按 mjlab manager/config 模式迁移。
 - 地形及其他核心功能需保持行为一致（reset、command、观测/动作、终止、课程学习）。
+- 迁移后必须清理 Isaac/IsaacLab 接口残留（import、类型、字段、注释、路径）。
+- 对 InstinctLab 特有命名保持稳定（例如 `hack_generator`），仅在 mjlab 必要字段映射处改名。
 - 清理无效旧路径、过期注释和迁移遗留内容。
 
 ## Isaac Lab 到 mjlab 对齐要点

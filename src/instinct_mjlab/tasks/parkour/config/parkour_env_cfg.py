@@ -578,12 +578,12 @@ def set_parkour_commands(cfg: ManagerBasedRlEnvCfg) -> None:
 
 
 def set_parkour_observations(cfg: ManagerBasedRlEnvCfg) -> None:
-  """Set parkour-specific actor/critic observation groups (in-place).
+  """Set parkour-specific policy/critic observation groups (in-place).
 
   Mirrors the original InstinctLab ``ObservationsCfg.PolicyCfg`` and
   ``ObservationsCfg.CriticCfg``.
   """
-  actor_terms = {
+  policy_terms = {
     "base_ang_vel": ObservationTermCfg(
       func=envs_mdp.base_ang_vel,
       noise=UniformNoiseCfg(n_min=-0.2, n_max=0.2),
@@ -716,8 +716,8 @@ def set_parkour_observations(cfg: ManagerBasedRlEnvCfg) -> None:
       noise=None,
     ),
   }
-  cfg.observations["actor"] = ObservationGroupCfg(
-    terms=actor_terms,
+  cfg.observations["policy"] = ObservationGroupCfg(
+    terms=policy_terms,
     concatenate_terms=False,
     enable_corruption=True,
   )

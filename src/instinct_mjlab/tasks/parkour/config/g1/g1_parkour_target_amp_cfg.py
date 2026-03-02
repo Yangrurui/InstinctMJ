@@ -242,9 +242,7 @@ def _set_parkour_actuators(cfg: ManagerBasedRlEnvCfg) -> None:
 
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
-  # Keep Parkour action dimensions aligned with InstinctLab 29-DoF joint order.
-  joint_pos_action.actuator_names = G1_29DOF_INSTINCTLAB_JOINT_ORDER
-  joint_pos_action.preserve_order = True
+  # Keep direct joint readout order from entity/action pipeline.
   joint_pos_action.scale = copy.deepcopy(beyondmimic_action_scale)
 
 
@@ -345,24 +343,3 @@ def instinct_g1_parkour_amp_final_cfg(
     _set_world_free_viewer(cfg)
 
   return cfg
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatible class aliases (thin wrappers for registration)
-# ---------------------------------------------------------------------------
-
-
-class G1ParkourEnvCfg(ManagerBasedRlEnvCfg):
-  """G1 parkour train config (with shoe)."""
-
-  def __init__(self):
-    cfg = instinct_g1_parkour_amp_final_cfg(play=False, shoe=True)
-    super().__init__(**{f.name: getattr(cfg, f.name) for f in cfg.__dataclass_fields__.values()})
-
-
-class G1ParkourEnvCfg_PLAY(ManagerBasedRlEnvCfg):
-  """G1 parkour play config (with shoe)."""
-
-  def __init__(self):
-    cfg = instinct_g1_parkour_amp_final_cfg(play=True, shoe=True)
-    super().__init__(**{f.name: getattr(cfg, f.name) for f in cfg.__dataclass_fields__.values()})

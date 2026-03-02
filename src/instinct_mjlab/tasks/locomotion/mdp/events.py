@@ -29,18 +29,18 @@ def randomize_rigid_body_material(
   num_buckets: int = 64,
 ) -> None:
   """Randomize rigid-body geom friction coefficients."""
-  del num_buckets
+  slide_friction_range = (
+    min(static_friction_range[0], dynamic_friction_range[0]),
+    max(static_friction_range[1], dynamic_friction_range[1]),
+  )
+  # MuJoCo does not provide a direct restitution coefficient in geom_friction.
+  del num_buckets, restitution_range
   mdp.dr.geom_friction(
     env=env,
     env_ids=env_ids,
-    ranges={
-      0: static_friction_range,
-      1: dynamic_friction_range,
-      2: restitution_range,
-    },
+    ranges=slide_friction_range,
     operation="abs",
     asset_cfg=asset_cfg,
-    axes=[0, 1, 2],
   )
 
 

@@ -18,6 +18,7 @@ _TRACKING_MOTION_REQUIRED_KEYS = (
 
 
 _DEFAULT_DATASET_CANDIDATES = (
+  "~/Xyk/Datasets",
   "~/Datasets",
 )
 

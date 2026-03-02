@@ -1,4 +1,4 @@
-"""Timestamped buffer (from Isaac Lab) for lazy data caching with freshness tracking."""
+"""Timestamped buffer for lazy data caching with freshness tracking."""
 
 import torch
 from dataclasses import dataclass
@@ -14,8 +14,8 @@ class TimestampedBuffer:
     way the buffer can be used to check whether the data is outdated and needs to be refreshed.
 
     The buffer is useful for creating lazy buffers that only update the data when it is outdated. This can be
-    useful when the data is expensive to compute or retrieve. For example usage, refer to the data classes in
-    the :mod:`isaaclab.assets` module.
+    useful when the data is expensive to compute or retrieve. For example usage, refer to entity data classes
+    using lazy-updated cached tensors.
     """
 
     data: torch.Tensor = None  # type: ignore

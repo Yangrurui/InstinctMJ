@@ -70,7 +70,7 @@ def ref_frame_interval(
         [
             frame_interval,
             # I know this value start from frame_interval to negative values...
-            # It is not designed well in the isaacgym version.
+            # It is not designed well in the legacy implementation.
             time_to_target,
         ],
         dim=-1,

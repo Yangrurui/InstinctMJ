@@ -276,73 +276,9 @@ def _observations_cfg(link_of_interests: list[str]) -> dict[str, ObservationGrou
 
 
 def _rewards_cfg() -> dict[str, RewardTermCfg | None]:
-    return {
-        "base_position_imitation_gauss": RewardTermCfg(
-            func=instinct_mdp.base_position_imitation_gauss,
-            weight=0.5,
-            params={
-                "std": 0.3,
-            },
-        ),
-        "base_rot_imitation_gauss": RewardTermCfg(
-            func=instinct_mdp.base_rot_imitation_gauss,
-            weight=0.5,
-            params={
-                "std": 0.4,
-                "difference_type": "axis_angle",
-            },
-        ),
-        "motion_body_pos": RewardTermCfg(
-            func=instinct_mdp.link_pos_imitation_gauss,
-            weight=1.0,
-            params={
-                "combine_method": "mean_prod",
-                "in_base_frame": False,
-                "in_relative_world_frame": True,
-                "std": 0.3,
-            },
-        ),
-        "motion_body_ori": RewardTermCfg(
-            func=instinct_mdp.link_rot_imitation_gauss,
-            weight=1.0,
-            params={
-                "combine_method": "mean_prod",
-                "in_base_frame": False,
-                "in_relative_world_frame": True,
-                "std": 0.4,
-            },
-        ),
-        "motion_body_lin_vel": RewardTermCfg(
-            func=instinct_mdp.link_lin_vel_imitation_gauss,
-            weight=1.0,
-            params={
-                "combine_method": "mean_prod",
-                "std": 1.0,
-            },
-        ),
-        "motion_body_ang_vel": RewardTermCfg(
-            func=instinct_mdp.link_ang_vel_imitation_gauss,
-            weight=1.0,
-            params={
-                "combine_method": "mean_prod",
-                "std": 3.14,
-            },
-        ),
-        "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
-        "joint_limit": RewardTermCfg(
-            func=mdp.joint_pos_limits,
-            weight=-10.0,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
-        ),
-        "undesired_contacts": RewardTermCfg(
-            func=instinct_mdp.undesired_contacts,
-            weight=-0.1,
-            params={
-                "sensor_name": _UNDESIRED_CONTACT_SENSOR_NAME,
-                "threshold": 1.0,
-            },
-        ),
-    }
+    # InstinctLab source inherits rewards from beyondmimic_env_cfg.
+    # Keep the same inheritance behavior instead of redefining locally.
+    return deepcopy(beyondmimic_cfg.make_beyondmimic_rewards())
 
 
 def _events_cfg() -> dict[str, EventTermCfg | None]:

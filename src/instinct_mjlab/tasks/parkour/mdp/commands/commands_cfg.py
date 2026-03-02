@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass
 
 from instinct_mjlab.managers import CommandTermCfg
 
@@ -10,7 +10,7 @@ class PoseVelocityCommandCfg(CommandTermCfg):
 
     class_type: type = PoseVelocityCommand
 
-    entity_name: str = None
+    entity_name: str = MISSING
     """Name of the entity in the environment for which commands are generated."""
 
     velocity_control_stiffness: float = 1.0
@@ -26,16 +26,16 @@ class PoseVelocityCommandCfg(CommandTermCfg):
     class Ranges:
         """Uniform distribution ranges for the velocity commands."""
 
-        lin_vel_x: tuple[float, float] = None
+        lin_vel_x: tuple[float, float] = MISSING
         """Range for the linear-x velocity command (in m/s)."""
 
-        lin_vel_y: tuple[float, float] = None
+        lin_vel_y: tuple[float, float] = MISSING
         """Range for the linear-y velocity command (in m/s)."""
 
-        ang_vel_z: tuple[float, float] = None
+        ang_vel_z: tuple[float, float] = MISSING
         """Range for the angular-z velocity command (in rad/s)."""
 
-    ranges: Ranges = None
+    ranges: Ranges = MISSING
     """Distribution ranges for the velocity commands. Only used in random_velocity_terrains."""
 
     random_velocity_terrain: list[str] = None

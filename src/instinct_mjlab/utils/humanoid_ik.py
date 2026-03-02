@@ -154,7 +154,7 @@ class HumanoidSmplRotationalIK:
             hip_waist_mixing=self.hip_waist_mixing,
         )  # shape [N, 29], [N, 4]
 
-        # update smpl_root_quat in isaacsim coordinate system
+        # update smpl_root_quat in simulator world coordinate convention
         smpl_root_quat = math_utils.quat_mul(
             smpl_root_quat,
             self.swap_rot_quat.expand(retargetted_joints.shape[0], -1),

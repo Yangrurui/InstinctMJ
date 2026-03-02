@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from instinct_mjlab.motion_reference import MotionReferenceManager
 from mjlab.managers import SceneEntityCfg
+from mjlab.managers.event_manager import RecomputeLevel, requires_model_fields
 from mjlab.utils.lab_api import math as math_utils
 
 if TYPE_CHECKING:
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv as ManagerBasedEnv
 
 
+@requires_model_fields("body_gravcomp", recompute=RecomputeLevel.set_const_fixed)
 def virtualize_articulation(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,
@@ -29,21 +31,21 @@ def virtualize_articulation(
 
     # resolve environment ids (num_envs)
     if env_ids is None:
-        env_ids = torch.arange(env.scene.num_envs, dtype=torch.int, device="cpu")
+        env_ids = torch.arange(env.scene.num_envs, dtype=torch.long, device=env.device)
     else:
-        env_ids = env_ids.cpu().to(torch.int)
+        env_ids = env_ids.to(dtype=torch.long, device=env.device)
 
-    # select all bodies (num_bodies)
-    body_ids = torch.arange(asset.num_bodies, dtype=torch.int, device="cpu")
+    # resolve body indices (global ids in MuJoCo model arrays)
+    if asset_cfg.body_ids == slice(None):
+        body_ids = asset.indexing.body_ids
+    else:
+        body_ids_local = torch.tensor(asset_cfg.body_ids, dtype=torch.long, device=env.device)
+        body_ids = asset.indexing.body_ids[body_ids_local]
 
-    # build meshgrid for all environment and body ids
-    env_ids, body_ids = torch.meshgrid(env_ids, body_ids)
-
-    # get the current masses of the bodies (num_assets, num_bodies)
-    masses = asset.root_physx_view.get_masses()
-
-    # set the gravity of the bodies to zero
-    asset.root_physx_view.set_disable_gravities(torch.ones_like(masses).to(torch.bool), env_ids)
+    # MuJoCo does not provide a PhysX-style per-body gravity toggle.
+    # gravcomp=1.0 compensates full gravity for the selected bodies.
+    env_grid, body_grid = torch.meshgrid(env_ids, body_ids, indexing="ij")
+    env.sim.model.body_gravcomp[env_grid, body_grid] = 1.0
 
 
 def match_motion_ref_with_scene(

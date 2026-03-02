@@ -129,7 +129,7 @@ class base_position_offset_imitation_gauss(ManagerTermBase):
     """
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
 
         self.asset_cfg = self.cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
         self.asset = self._env.scene[self.asset_cfg.name]
@@ -237,10 +237,10 @@ def base_velocity_imitation_gauss(
             root_quat_w,
             base_vel_ref_w,
         )
-        base_vel = asset.data.root_lin_vel_b  # (batch_size, 3)
+        base_vel = asset.data.root_link_lin_vel_b  # (batch_size, 3)
     else:
         base_vel_ref = base_vel_ref_w
-        base_vel = asset.data.root_lin_vel_w  # (batch_size, 3)
+        base_vel = asset.data.root_link_lin_vel_w  # (batch_size, 3)
     base_vel_diff = base_vel - base_vel_ref  # (batch_size, 3)
 
     rewards = torch.exp(-torch.sum(torch.square(base_vel_diff), dim=-1) / (std * std))
@@ -268,10 +268,10 @@ def base_velocity_imitation_square(
             motion_reference.reference_frame.base_quat_w[:, 0],
             motion_reference.reference_frame.base_lin_vel_w[:, 0],  # (batch_size, 3)
         )
-        base_vel = asset.data.root_lin_vel_b  # (batch_size, 3)
+        base_vel = asset.data.root_link_lin_vel_b  # (batch_size, 3)
     else:
         base_vel_ref = motion_reference.reference_frame.base_lin_vel_w[:, 0]  # (batch_size, 3)
-        base_vel = asset.data.root_lin_vel_w  # (batch_size, 3)
+        base_vel = asset.data.root_link_lin_vel_w  # (batch_size, 3)
     base_vel_diff = base_vel - base_vel_ref  # (batch_size, 3)
 
     rewards = torch.sum(torch.square(base_vel_diff), dim=-1)  # (batch_size,)
@@ -543,7 +543,7 @@ class joint_pos_tracking_gauss_normalized(ManagerTermBase):
     """joint_pos_tracking with gauss kernel, the sigma is computed dynamically for each joints across all samples."""
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
-        super().__init__(cfg, env)
+        super().__init__(env)
 
     def __call__(
         self,
@@ -1135,7 +1135,7 @@ def link_lin_vel_imitation_gauss(
     if in_base_frame:
         root_pos_w = asset.data.root_link_pos_w
         root_quat_w = asset.data.root_link_quat_w
-        root_lin_vel_w = asset.data.root_lin_vel_w
+        root_link_lin_vel_w = asset.data.root_link_lin_vel_w
         root_ang_vel_w = asset.data.root_ang_vel_w
         links_pos_w = asset.data.body_link_pos_w[:, link_indices]  # (batch_size, num_links, 3)
         link_pos_offset_w = links_pos_w - root_pos_w.unsqueeze(1)  # (batch_size, num_links, 3)
@@ -1143,7 +1143,7 @@ def link_lin_vel_imitation_gauss(
             root_quat_w.unsqueeze(1).expand(-1, links_lin_vel_w.shape[1], -1),
             (
                 links_lin_vel_w
-                - root_lin_vel_w.unsqueeze(1)
+                - root_link_lin_vel_w.unsqueeze(1)
                 - torch.cross(root_ang_vel_w.unsqueeze(1), link_pos_offset_w, dim=-1)
             ),
         )  # (batch_size, num_links, 3)

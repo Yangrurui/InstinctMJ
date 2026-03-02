@@ -22,13 +22,13 @@ from mjlab.managers import SceneEntityCfg
 from mjlab.managers import TerminationTermCfg
 from mjlab.scene import SceneCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
-from mjlab.tasks.tracking import mdp as tracking_mdp
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg
 from mjlab.utils.spec_config import MaterialCfg, TextureCfg
 from mjlab.viewer.viewer_config import ViewerConfig
 
 import instinct_mjlab.envs.mdp as instinct_mdp
+import instinct_mjlab.tasks.shadowing.whole_body.shadowing_env_cfg as shadowing_cfg
 from instinct_mjlab.assets.unitree_g1 import (
     G1_29DOF_TORSOBASE_POPSICLE_CFG,
     beyondmimic_action_scale,
@@ -381,6 +381,7 @@ def _make_scene_cfg(*, play: bool, motion_reference_cfg: MotionReferenceManagerC
         fields=("found", "force"),
         reduce="netforce",
         num_slots=1,
+        history_length=3,
     )
     self_collision = ContactSensorCfg(
         name=_SELF_COLLISION_SENSOR_NAME,
@@ -446,7 +447,7 @@ def _commands_cfg() -> dict[str, object]:
 
 def _observations_cfg(link_of_interests: list[str]) -> dict[str, ObservationGroupCfg]:
     return {
-        "actor": ObservationGroupCfg(
+        "policy": ObservationGroupCfg(
             terms={
                 # BeyondMimic specific reference observations
                 "joint_pos_ref": ObservationTermCfg(
@@ -546,78 +547,9 @@ def _observations_cfg(link_of_interests: list[str]) -> dict[str, ObservationGrou
 
 
 def _rewards_cfg() -> dict[str, RewardTermCfg | None]:
-    return {
-        "base_position_imitation_gauss": RewardTermCfg(
-            func=instinct_mdp.base_position_imitation_gauss,
-            weight=0.5,
-            params={
-                "std": 0.3,
-            },
-        ),
-        "base_rot_imitation_gauss": RewardTermCfg(
-            func=instinct_mdp.base_rot_imitation_gauss,
-            weight=0.5,
-            params={
-                "std": 0.4,
-                "difference_type": "axis_angle",
-            },
-        ),
-        "link_pos_imitation_gauss": RewardTermCfg(
-            func=instinct_mdp.link_pos_imitation_gauss,
-            weight=1.0,
-            params={
-                "combine_method": "mean_prod",
-                "in_base_frame": False,
-                "in_relative_world_frame": True,
-                "std": 0.3,
-            },
-        ),
-        "link_rot_imitation_gauss": RewardTermCfg(
-            func=instinct_mdp.link_rot_imitation_gauss,
-            weight=1.0,
-            params={
-                "combine_method": "mean_prod",
-                "in_base_frame": False,
-                "in_relative_world_frame": True,
-                "std": 0.4,
-            },
-        ),
-        "link_lin_vel_imitation_gauss": RewardTermCfg(
-            func=instinct_mdp.link_lin_vel_imitation_gauss,
-            weight=1.0,
-            params={
-                "combine_method": "mean_prod",
-                "std": 1.0,
-            },
-        ),
-        "link_ang_vel_imitation_gauss": RewardTermCfg(
-            func=instinct_mdp.link_ang_vel_imitation_gauss,
-            weight=1.0,
-            params={
-                "combine_method": "mean_prod",
-                "std": 3.14,
-            },
-        ),
-        "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
-        "joint_limit": RewardTermCfg(
-            func=mdp.joint_pos_limits,
-            weight=-10.0,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
-        ),
-        "self_collisions": RewardTermCfg(
-            func=tracking_mdp.self_collision_cost,
-            weight=-10.0,
-            params={"sensor_name": _SELF_COLLISION_SENSOR_NAME},
-        ),
-        "undesired_contacts": RewardTermCfg(
-            func=instinct_mdp.undesired_contacts,
-            weight=-0.1,
-            params={
-                "sensor_name": _UNDESIRED_CONTACT_SENSOR_NAME,
-                "threshold": 1.0,
-            },
-        ),
-    }
+    # InstinctLab source inherits rewards from whole_body.shadowing_env_cfg.
+    # Keep the same inheritance behavior instead of redefining locally.
+    return deepcopy(shadowing_cfg.shadowing_rewards_terms())
 
 
 def _events_cfg() -> dict[str, EventTermCfg | None]:
@@ -1013,7 +945,7 @@ def _build_run_name(cfg: InstinctLabRLEnvCfg, motion_reference_cfg: MotionRefere
             f"_{MOTION_NAME}",
             (
                 "_odomObs"
-                if ("base_lin_vel" in cfg.observations["actor"].terms.keys())
+                if ("base_lin_vel" in cfg.observations["policy"].terms.keys())
                 and cfg.commands["position_b_ref_command"].anchor_frame == "robot"
                 else ""
             ),

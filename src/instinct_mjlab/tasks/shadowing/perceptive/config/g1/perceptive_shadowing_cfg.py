@@ -152,7 +152,7 @@ def _apply_motion_matched_terrain_source(
 @dataclass(kw_only=True)
 class G1PerceptiveShadowingEnvCfg(perceptual_cfg.PerceptiveShadowingEnvCfg):
     scene: perceptual_cfg.PerceptiveShadowingSceneCfg = field(default_factory=lambda: perceptual_cfg.PerceptiveShadowingSceneCfg(
-        num_envs=2048,
+        num_envs=4096,
         entities=perceptual_cfg.make_perceptive_scene_entities(
             robot=deepcopy(G1_CFG),
         ),
