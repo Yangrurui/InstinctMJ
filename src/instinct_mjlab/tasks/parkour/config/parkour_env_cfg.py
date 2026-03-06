@@ -492,7 +492,7 @@ def set_parkour_scene_sensors(cfg: ManagerBasedRlEnvCfg) -> None:
     focal_length=1.0,
     horizontal_aperture=2 * math.tan(math.radians(89.51) / 2.0),
     vertical_aperture=2 * math.tan(math.radians(58.29) / 2.0),
-    ray_alignment="base",
+    ray_alignment="yaw",
     offset=NoisyGroupedRayCasterCameraCfg.OffsetCfg(
       # G1 Robot head camera nominal pose
       pos=(
@@ -1028,6 +1028,15 @@ def set_parkour_terminations(cfg: ManagerBasedRlEnvCfg) -> None:
       func=parkour_mdp.root_height_below_env_origin_minimum,
       params={"minimum_height": 0.5},
     ),
+    "dataset_exhausted": TerminationTermCfg(
+      func=instinct_envs_mdp.dataset_exhausted,
+      time_out=True,
+      params={
+        "reference_cfg": SceneEntityCfg(name="motion_reference"),
+        "print_reason": False,
+        "reset_without_notice": True,
+      },
+    ),
   }
 
 
@@ -1175,14 +1184,14 @@ def _soften_parkour_terrain_lights(spec) -> None:
 
 def set_parkour_basic_settings(cfg: ManagerBasedRlEnvCfg) -> None:
   """Set parkour basic environment settings (in-place)."""
-  cfg.scene.num_envs = 1024 * 2
+  cfg.scene.num_envs = 4096
   cfg.scene.env_spacing = 2.5
   cfg.episode_length_s = 20.0
   # Parkour introduces many simultaneous terrain contacts; fixed small caps from
   # tracking (nconmax=35, njmax=250) can overflow and drop contact constraints.
   # In mjwarp, naconmax scales with nworld * nconmax; leaving nconmax auto-sized
   # (192 for this model) can create very large temporary narrowphase buffers on
-  # 2048-env runs. Use a bounded per-world contact budget to control VRAM while
+  # 4096-env runs. Use a bounded per-world contact budget to control VRAM while
   # keeping enough headroom for rough-terrain foot contacts.
   cfg.sim.nconmax = 128
   cfg.sim.njmax = 700

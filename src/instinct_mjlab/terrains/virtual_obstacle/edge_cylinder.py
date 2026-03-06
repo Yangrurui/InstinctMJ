@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
     from .edge_cylinder_cfg import (
         EdgeCylinderCfg,
+        FeatureEdgeCylinderCfg,
         GreedyconcatEdgeCylinderCfg,
         PluckerEdgeCylinderCfg,
         RansacEdgeCylinderCfg,
@@ -37,6 +38,30 @@ def _marker_rgba_from_cfg(marker_cfg) -> tuple[float, float, float, float]:
     diffuse = visual_material.diffuse_color
     opacity = visual_material.opacity
     return (float(diffuse[0]), float(diffuse[1]), float(diffuse[2]), float(opacity))
+
+
+def _remaining_debug_geom_capacity(visualizer) -> int | None:
+    scn = getattr(visualizer, "scn", None)
+    if scn is None:
+        return None
+    geoms = getattr(scn, "geoms", None)
+    ngeom = getattr(scn, "ngeom", None)
+    if geoms is None or ngeom is None:
+        return None
+    return max(len(geoms) - int(ngeom), 0)
+
+
+def _sample_debug_rows(rows: torch.Tensor, capacity: int | None) -> torch.Tensor:
+    if rows.numel() == 0 or capacity is None:
+        return rows
+    if capacity <= 0:
+        return rows[:0]
+    count = int(rows.shape[0])
+    if count <= capacity:
+        return rows
+    sample_ids = torch.linspace(0, count - 1, steps=capacity, device=rows.device)
+    sample_ids = torch.round(sample_ids).to(torch.long)
+    return rows.index_select(0, sample_ids)
 
 
 class EdgeCylinder(VirtualObstacleBase):
@@ -130,7 +155,8 @@ class EdgeCylinder(VirtualObstacleBase):
         marker_cfg = self.cfg.visualizer.markers["cylinder"]
         rgba = _marker_rgba_from_cfg(marker_cfg)
         radius = float(self.cfg.cylinder_radius)
-        for edge in self.edges_pyt:
+        edge_rows = _sample_debug_rows(self.edges_pyt, _remaining_debug_geom_capacity(visualizer))
+        for edge in edge_rows:
             visualizer.add_cylinder(
                 start=edge[:3],
                 end=edge[3:6],
@@ -713,28 +739,136 @@ class RayEdgeCylinder(VirtualObstacleBase):
         )
 
     def debug_vis(self, visualizer: "DebugVisualizer") -> None:
+        remaining_capacity = _remaining_debug_geom_capacity(visualizer)
         if self.edges_pyt.numel() != 0:
             cylinder_marker_cfg = self.cfg.visualizer.markers["cylinder"]
             cylinder_rgba = _marker_rgba_from_cfg(cylinder_marker_cfg)
             radius = float(self.cfg.cylinder_radius)
-            for edge in self.edges_pyt:
+            edge_rows = _sample_debug_rows(self.edges_pyt, remaining_capacity)
+            for edge in edge_rows:
                 visualizer.add_cylinder(
                     start=edge[:3],
                     end=edge[3:6],
                     radius=radius,
                     color=cylinder_rgba,
                 )
+            if remaining_capacity is not None:
+                remaining_capacity = max(remaining_capacity - int(edge_rows.shape[0]), 0)
 
         if self.points_list.numel() != 0:
             sphere_marker_cfg = self.cfg.points_visualizer.markers["sphere"]
             sphere_rgba = _marker_rgba_from_cfg(sphere_marker_cfg)
             sphere_radius = float(sphere_marker_cfg.radius)
-            for point in self.points_list:
+            point_rows = _sample_debug_rows(self.points_list, remaining_capacity)
+            for point in point_rows:
                 visualizer.add_sphere(
                     center=point,
                     radius=sphere_radius,
                     color=sphere_rgba,
                 )
+
+
+class FeatureEdgeCylinder(VirtualObstacleBase):
+    """class for feature-extracted edge detectors."""
+
+    def __init__(self, cfg: FeatureEdgeCylinderCfg):
+        super().__init__(cfg)
+        self.cfg: FeatureEdgeCylinderCfg = cfg
+
+    def generate(self, mesh: trimesh.Trimesh, device="cpu") -> None:
+        """Detect sharp edges in the mesh and store the edge cylinder as virtual obstacle.
+
+        Args:
+            mesh: The trimesh object to analyze.
+
+        Returns:
+            A np array batch indicating the edges: (num_edges, 6)
+            - x, y, z coordinates of the edge start point
+            - x, y, z coordinates of the edge end point
+        """
+        import pyvista as pv
+
+        self.device = device if isinstance(device, torch.device) else torch.device(device)
+        # extract vertices and faces from the trimesh object
+        points = mesh.vertices.astype(np.float32)
+        indices = mesh.faces.astype(np.int32)
+        pv_mesh = pv.PolyData(points, np.hstack((np.full((indices.shape[0], 1), 3), indices)))
+        edges = pv_mesh.extract_feature_edges(
+            feature_angle=self.cfg.feature_angle,
+            boundary_edges=True,
+            non_manifold_edges=True,
+            feature_edges=True,
+            manifold_edges=False,
+        )
+        edge_end_points = np.empty((0, 6), dtype=np.float32)
+        if edges.n_cells > 0:
+            lines = edges.lines
+            points = edges.points
+            edge_coords = []
+            i = 0
+            while i < len(lines):
+                num_pts = int(lines[i])
+                if num_pts == 2:
+                    pt_idx1 = int(lines[i + 1])
+                    pt_idx2 = int(lines[i + 2])
+                    start = points[pt_idx1]
+                    end = points[pt_idx2]
+                    edge_coords.append(np.concatenate([start, end]))
+                i += num_pts + 1
+
+            if edge_coords:
+                edge_end_points = np.array(edge_coords, dtype=np.float32)
+                print(f"Detected {edge_end_points.shape[0]} edges from feature extraction.")
+            else:
+                print("[WARNING] No edges extracted from features.")
+        else:
+            print("[WARNING] No sharp edges detected.")
+
+        self.edges_pyt = torch.tensor(edge_end_points, dtype=torch.float32, device=self.device)
+
+        # create a cylinder spatial grid for the edges and for penetration offset computation
+        if edge_end_points.size > 0:
+            self.cylinders = CylinderSpatialGrid(
+                cylinders=np.concatenate(
+                    [
+                        edge_end_points,
+                        np.ones_like(edge_end_points[:, :1]) * self.cfg.cylinder_radius,
+                    ],
+                    axis=1,
+                ),
+                num_grid_cells=self.cfg.num_grid_cells,
+                device=self.device,
+            )
+        else:
+            self.cylinders = None
+
+    def disable_visualizer(self):
+        return
+
+    def visualize(self):
+        return
+
+    def get_points_penetration_offset(self, points):
+        return (
+            self.cylinders.get_points_penetration_offset(points)
+            if self.cylinders is not None
+            else torch.zeros_like(points, device=self.device)
+        )
+
+    def debug_vis(self, visualizer: "DebugVisualizer") -> None:
+        if self.edges_pyt.numel() == 0:
+            return
+        marker_cfg = self.cfg.visualizer.markers["cylinder"]
+        rgba = _marker_rgba_from_cfg(marker_cfg)
+        radius = float(self.cfg.cylinder_radius)
+        edge_rows = _sample_debug_rows(self.edges_pyt, _remaining_debug_geom_capacity(visualizer))
+        for edge in edge_rows:
+            visualizer.add_cylinder(
+                start=edge[:3],
+                end=edge[3:6],
+                radius=radius,
+                color=rgba,
+            )
 
 
 def process_camera_edges(i, depth_image, normal_image, cfg):

@@ -369,7 +369,7 @@ class G1PerceptiveVaeEnvCfg_PLAY(G1PerceptiveVaeEnvCfg):
         # self.events["add_joint_default_pos"].params["offset_distribution_params"] = (-0.05, 0.05)
         # self.events["physics_material"].params["static_friction_range"] = (2.0, 2.0)
         # self.events["physics_material"].params["dynamic_friction_range"] = (2.0, 2.0)
-        # self.events["base_com"].params["coms_z_distribution_params"] = (0.15, 0.15)
+        # self.events["base_com"].params["com_range"]["z"] = (0.15, 0.15)
 
         # remove some randomizations
         self.events["add_joint_default_pos"] = None
@@ -440,7 +440,7 @@ class G1PerceptiveVaeEnvCfg_PLAY(G1PerceptiveVaeEnvCfg):
         #     ),
         #     init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, -1.0, 0.3)),
         # )
-        # self.scene.camera.mesh_prim_paths.append("/World/envs/env_.*/cube/.*")
+        # camera_cfg.mesh_prim_paths.append("/cube")
 
         # see the reference robot
-        # self.scene.camera.mesh_prim_paths.append("/World/envs/env_.*/RobotReference/.*")
+        # camera_cfg.mesh_prim_paths.append("/robot_reference")

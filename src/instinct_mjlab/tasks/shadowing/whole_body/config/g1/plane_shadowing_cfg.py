@@ -568,14 +568,15 @@ def _events_cfg() -> dict[str, EventTermCfg | None]:
             },
         ),
         "base_com": EventTermCfg(
-            func=instinct_mdp.randomize_rigid_body_coms,
+            func=instinct_mdp.randomize_rigid_body_com,
             mode="startup",
             params={
                 "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
-                "coms_x_distribution_params": (-0.025, 0.025),
-                "coms_y_distribution_params": (-0.05, 0.05),
-                "coms_z_distribution_params": (-0.05, 0.05),
-                "distribution": "uniform",
+                "com_range": {
+                    "x": (-0.025, 0.025),
+                    "y": (-0.05, 0.05),
+                    "z": (-0.05, 0.05),
+                },
             },
         ),
         # interval

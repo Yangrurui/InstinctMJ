@@ -165,6 +165,7 @@ class G1PerceptiveShadowingEnvCfg(perceptual_cfg.PerceptiveShadowingEnvCfg):
 
         robot_cfg = perceptual_cfg.get_scene_entity_cfg(self.scene, "robot")
         motion_reference_cfg = perceptual_cfg.get_motion_reference_cfg(self.scene)
+        camera_cfg = perceptual_cfg.get_camera_sensor_cfg(self.scene)
 
         robot_cfg.articulation.actuators = beyondmimic_g1_29dof_actuator_cfgs
         # self.scene.robot.spawn.rigid_props.max_depenetration_velocity = 0.3
@@ -378,7 +379,7 @@ class G1PerceptiveShadowingEnvCfg_PLAY(G1PerceptiveShadowingEnvCfg):
         #     ),
         #     init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, -1.35, 0.25)),
         # )
-        # self.scene.camera.mesh_prim_paths.append("/World/envs/env_.*/cube/.*")
+        # camera_cfg.mesh_prim_paths.append("/cube")
         # self.scene.distractor = RigidObjectCfg(
         #     prim_path="{ENV_REGEX_NS}/cube",
         #     spawn=sim_utils.MeshCuboidCfg(
@@ -395,7 +396,7 @@ class G1PerceptiveShadowingEnvCfg_PLAY(G1PerceptiveShadowingEnvCfg):
         #     ),
         #     init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, -2.35, 0.25)),
         # )
-        # self.scene.camera.mesh_prim_paths.append("/World/envs/env_.*/cube/.*")
+        # camera_cfg.mesh_prim_paths.append("/cube")
         # self.scene.distractor = RigidObjectCfg(
         #     prim_path="{ENV_REGEX_NS}/cube",
         #     spawn=sim_utils.MeshCuboidCfg(
@@ -412,7 +413,7 @@ class G1PerceptiveShadowingEnvCfg_PLAY(G1PerceptiveShadowingEnvCfg):
         #     ),
         #     init_state=RigidObjectCfg.InitialStateCfg(pos=(-0.8, -1.35, 0.25)),
         # )
-        # self.scene.camera.mesh_prim_paths.append("/World/envs/env_.*/cube/.*")
+        # camera_cfg.mesh_prim_paths.append("/cube")
 
         # self.scene.distractor1 = RigidObjectCfg(
         #     prim_path="{ENV_REGEX_NS}/cone1",
@@ -431,7 +432,7 @@ class G1PerceptiveShadowingEnvCfg_PLAY(G1PerceptiveShadowingEnvCfg):
         #     ),
         #     init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, -1.0, 0.3)),
         # )
-        # self.scene.camera.mesh_prim_paths.append("/World/envs/env_.*/cone1/.*")
+        # camera_cfg.mesh_prim_paths.append("/cone1")
 
         # see the reference robot
-        # self.scene.camera.mesh_prim_paths.append("/World/envs/env_.*/RobotReference/.*")
+        # camera_cfg.mesh_prim_paths.append("/robot_reference")

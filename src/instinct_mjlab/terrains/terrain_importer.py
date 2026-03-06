@@ -634,38 +634,21 @@ class TerrainImporter(TerrainImporterBase):
         if len(self._virtual_obstacles) == 0:
             return True
 
-        drop_cell_diagonals = bool(self.cfg.virtual_obstacle_hfield_mesh_like_drop_cell_diagonals)
-        trace_segments = bool(self.cfg.virtual_obstacle_hfield_mesh_like_trace_segments)
-        min_edge_length = float(self.cfg.virtual_obstacle_hfield_mesh_like_min_edge_length)
-        cached_segments_by_angle: dict[float, np.ndarray] = {}
-        generated_any = False
-        for name, virtual_obstacle in self._virtual_obstacles.items():
-            if not virtual_obstacle.supports_edge_segment_generation:
-                hfield_surface_mesh = self._collect_hfield_surface_mesh()
-                if hfield_surface_mesh is None:
-                    self._cleanup_heightfield_virtual_obstacle_cache(cached_segments_by_angle)
-                    return False
-                self._generate_virtual_obstacles(hfield_surface_mesh)
-                del hfield_surface_mesh
-                self._cleanup_heightfield_virtual_obstacle_cache(cached_segments_by_angle)
-                return True
-
-            angle_threshold = float(virtual_obstacle.angle_threshold)
-            cache_key = round(angle_threshold, 6)
-            if cache_key not in cached_segments_by_angle:
-                cached_segments_by_angle[cache_key] = self._collect_hfield_mesh_like_edge_segments(
-                    angle_threshold=angle_threshold,
-                    drop_cell_diagonals=drop_cell_diagonals,
-                    trace_segments=trace_segments,
-                    min_edge_length=min_edge_length,
-                )
-            edge_segments = cached_segments_by_angle[cache_key]
-            with Timer(f"Generate virtual obstacle {name} from heightfield (mesh_like)"):
-                virtual_obstacle.generate_from_edge_segments(edge_segments, device=self.device)
-            generated_any = True
-
-        self._cleanup_heightfield_virtual_obstacle_cache(cached_segments_by_angle)
-        return generated_any
+        # Preserve original InstinctLab semantics as closely as possible:
+        # reconstruct one mesh-like hfield surface first, merge shared tile
+        # vertices, then let each obstacle use its native `generate(mesh)` flow.
+        # This avoids discontinuities introduced by per-tile edge tracing.
+        hfield_surface_mesh = self._collect_hfield_surface_mesh()
+        if hfield_surface_mesh is None:
+            return False
+        self._generate_virtual_obstacles(hfield_surface_mesh)
+        del hfield_surface_mesh
+        gc.collect()
+        if torch.cuda.is_available():
+            device_type = torch.device(self.device).type
+            if device_type == "cuda":
+                torch.cuda.empty_cache()
+        return True
 
     def _cleanup_heightfield_virtual_obstacle_cache(self, cached_segments_by_angle: dict[float, np.ndarray]) -> None:
         # Mesh-like extraction can allocate large temporary numpy/trimesh buffers.

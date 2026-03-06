@@ -88,7 +88,3 @@ class GroupedRayCasterCameraCfg(GroupedRayCasterCfg):
             },
         },
     ))
-
-    def __post_init__(self):
-        # Camera rays should use full frame orientation.
-        self.ray_alignment = "base"

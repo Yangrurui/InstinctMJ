@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING, Literal
 from instinct_mjlab.visualization.marker_cfg import VisualizationMarkersCfg
 from mjlab.sensor import GridPatternCfg
 
-from .edge_cylinder import GreedyconcatEdgeCylinder, PluckerEdgeCylinder, RansacEdgeCylinder, RayEdgeCylinder
+from .edge_cylinder import (
+    FeatureEdgeCylinder,
+    GreedyconcatEdgeCylinder,
+    PluckerEdgeCylinder,
+    RansacEdgeCylinder,
+    RayEdgeCylinder,
+)
 from .virtual_obstacle_base import VirtualObstacleCfg
 
 
@@ -213,3 +219,16 @@ class RayEdgeCylinderCfg(VirtualObstacleCfg):
             },
         )
     )
+
+
+@dataclass(kw_only=True)
+class FeatureEdgeCylinderCfg(EdgeCylinderCfg):
+    """The class to use for the feature-extracted edge cylinder generator."""
+
+    class_type: type = FeatureEdgeCylinder
+
+    cylinder_radius: float = 0.2
+    """The radius of the edge cylinder, which is used to treat the edge cylinders as a virtual obstacle."""
+
+    feature_angle: float = 15.0
+    """The angle threshold to consider a feature as an edge feature."""

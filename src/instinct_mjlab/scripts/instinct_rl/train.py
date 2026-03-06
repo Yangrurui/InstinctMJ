@@ -259,6 +259,17 @@ def _parse_cuda_device_index(device: str) -> int:
     return 0
 
 
+def _enforce_world_free_camera(viewer: NativeMujocoViewer) -> None:
+  cfg = getattr(viewer, "cfg", None)
+  if cfg is None or not hasattr(cfg, "OriginType"):
+    return
+  if cfg.origin_type != cfg.OriginType.WORLD:
+    return
+  if getattr(viewer, "viewer", None) is None or not hasattr(viewer, "_set_camera_world"):
+    return
+  viewer._set_camera_world()
+
+
 def _resolve_distributed_runtime(
   cfg: TrainConfig,
 ) -> tuple[str, int, int, int, bool]:
@@ -370,6 +381,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
       frame_rate=cfg.viewer_fps,
     )
     train_viewer.setup()
+    _enforce_world_free_camera(train_viewer)
     train_viewer.sync_env_to_viewer()
     print("[INFO] Native viewer enabled during training.")
 

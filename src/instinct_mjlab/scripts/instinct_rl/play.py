@@ -154,6 +154,25 @@ def _force_viewer_realtime_1x(viewer) -> None:
   viewer._time_multiplier = float(multipliers[speed_index])
 
 
+def _patch_world_free_camera(viewer: NativeMujocoViewer) -> None:
+  cfg = getattr(viewer, "cfg", None)
+  if cfg is None or not hasattr(cfg, "OriginType"):
+    return
+  if cfg.origin_type != cfg.OriginType.WORLD:
+    return
+  if not hasattr(viewer, "_setup_camera") or not hasattr(viewer, "_set_camera_world"):
+    return
+
+  original_setup_camera = viewer._setup_camera
+
+  def _wrapped_setup_camera() -> None:
+    original_setup_camera()
+    if getattr(viewer, "viewer", None) is not None:
+      viewer._set_camera_world()
+
+  viewer._setup_camera = _wrapped_setup_camera
+
+
 def _resolve_tracking_motion(_task_id: str, cfg: PlayConfig, env_cfg) -> None:
   is_tracking_task = "motion" in env_cfg.commands and isinstance(
     env_cfg.commands["motion"], MotionCommandCfg
@@ -552,6 +571,7 @@ def run_play(task_id: str, cfg: PlayConfig) -> None:
 
   if viewer_backend == "native":
     viewer = NativeMujocoViewer(viewer_env, policy)
+    _patch_world_free_camera(viewer)
     _force_viewer_realtime_1x(viewer)
     viewer.run(num_steps=rollout_steps)
   elif viewer_backend == "viser":

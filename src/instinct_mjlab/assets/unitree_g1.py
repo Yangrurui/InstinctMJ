@@ -496,6 +496,8 @@ G1_29Dof_TorsoBase_symmetric_augmentation_joint_reverse_buf = [
   -1,  # right wrist yaw
 ]
 
+# Ray-target helper uses membership only, but keep mjlab/MJCF body order here so
+# any downstream debugging or config dumps match the current MuJoCo asset.
 
 beyondmimic_action_scale: dict[str, float] = {}
 for actuator_cfg in beyondmimic_g1_29dof_actuator_cfgs:

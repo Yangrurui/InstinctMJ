@@ -169,24 +169,50 @@ def randomize_rigid_body_coms(
     coms_z_distribution_params: tuple[float, float],
     distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
 ):
+    """Legacy InstinctLab COM randomization signature.
+
+    Keep the existing "add to current values" semantics while delegating to the
+    latest ``com_range``-style implementation used by current shadowing tasks.
     """
-    .. tip::
-        This function uses CPU tensors to assign the body coms. It is recommended to use this function
-        only during the initialization of the environment.
-    """
+    randomize_rigid_body_com(
+        env=env,
+        env_ids=env_ids,
+        asset_cfg=asset_cfg,
+        com_range={
+            "x": coms_x_distribution_params,
+            "y": coms_y_distribution_params,
+            "z": coms_z_distribution_params,
+        },
+        distribution=distribution,
+    )
+
+
+def randomize_rigid_body_com(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor | None,
+    asset_cfg: SceneEntityCfg,
+    com_range: dict[str, tuple[float, float]],
+    distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
+):
+    """Randomize rigid-body COM offsets using latest InstinctLab ``com_range`` semantics."""
+    axis_map = {"x": 0, "y": 1, "z": 2}
+    ranges = {
+        axis_map[axis_name]: axis_range
+        for axis_name, axis_range in com_range.items()
+        if axis_name in axis_map
+    }
+    if len(ranges) == 0:
+        return
+
     # Keep InstinctLab "add to current values" semantics while using the model-field DR engine.
     dr.body_ipos(
         env=env,
         env_ids=env_ids,
-        ranges={
-            0: coms_x_distribution_params,
-            1: coms_y_distribution_params,
-            2: coms_z_distribution_params,
-        },
+        ranges=ranges,
         asset_cfg=asset_cfg,
         distribution=distribution,
         operation=_DR_ADD_CURRENT,
-        axes=[0, 1, 2],
+        axes=sorted(ranges.keys()),
     )
 
 
