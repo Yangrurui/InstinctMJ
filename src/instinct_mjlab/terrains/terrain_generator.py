@@ -460,39 +460,41 @@ class FiledTerrainGenerator(TerrainGenerator):
                 arr[sub_row, sub_col] = spawn_origin
 
         # Collect world-frame mesh for virtual obstacle generation.
-        # Prefer meshes reconstructed from the exact MuJoCo hfield specs so
-        # virtual obstacles stay aligned with runtime collision terrain.
+        # Prefer the generator-side source mesh so mesh-like virtual-obstacle
+        # extraction stays closer to the original IsaacLab/InstinctLab
+        # heightfield-to-mesh conversion path.
         surface_mesh_parts: list[trimesh.Trimesh] = []
-        has_hfield_surface = False
-        for terrain_geom in output.geometries:
-            geom = terrain_geom.geom
-            if geom is None:
-                continue
-            hfield_name = geom.hfieldname
-            if not isinstance(hfield_name, str) or hfield_name == "":
-                continue
-            mjs_hfield = spec.hfield(hfield_name)
-            if mjs_hfield is None:
-                continue
-            hfield_world_mesh = self._hfield_spec_to_world_mesh(
-                mjs_hfield,
-                geom_pos=np.asarray(geom.pos, dtype=np.float64),
-            )
-            if hfield_world_mesh is not None:
-                surface_mesh_parts.append(hfield_world_mesh)
-                has_hfield_surface = True
+        surface_mesh_local = getattr(output, "instinct_surface_mesh", None)
+        if isinstance(surface_mesh_local, trimesh.Trimesh):
+            world_surface_mesh = surface_mesh_local.copy()
+            world_surface_mesh.apply_translation(np.asarray(world_position, dtype=np.float64))
+            surface_mesh_parts.append(world_surface_mesh)
+        else:
+            for terrain_geom in output.geometries:
+                geom = terrain_geom.geom
+                if geom is None:
+                    continue
+                hfield_name = geom.hfieldname
+                if not isinstance(hfield_name, str) or hfield_name == "":
+                    continue
+                mjs_hfield = spec.hfield(hfield_name)
+                if mjs_hfield is None:
+                    continue
+                hfield_world_mesh = self._hfield_spec_to_world_mesh(
+                    mjs_hfield,
+                    geom_pos=np.asarray(geom.pos, dtype=np.float64),
+                )
+                if hfield_world_mesh is not None:
+                    surface_mesh_parts.append(hfield_world_mesh)
 
-        if not has_hfield_surface:
-            surface_mesh_local = getattr(output, "instinct_surface_mesh", None)
-            if isinstance(surface_mesh_local, trimesh.Trimesh):
-                world_surface_mesh = surface_mesh_local.copy()
-                world_surface_mesh.apply_translation(np.asarray(world_position, dtype=np.float64))
-                surface_mesh_parts.append(world_surface_mesh)
-
-        for terrain_geom in output.geometries:
-            box_mesh = self._box_geom_to_world_mesh(terrain_geom.geom)
-            if box_mesh is not None:
-                surface_mesh_parts.append(box_mesh)
+        # Keep the virtual-obstacle mesh aligned with the terrain surface mesh.
+        # For heightfield terrains, auxiliary box geoms are wall colliders only
+        # and should not contribute obstacle edges on the wall surfaces.
+        if len(surface_mesh_parts) == 0:
+            for terrain_geom in output.geometries:
+                box_mesh = self._box_geom_to_world_mesh(terrain_geom.geom)
+                if box_mesh is not None:
+                    surface_mesh_parts.append(box_mesh)
 
         if len(surface_mesh_parts) > 0:
             if len(surface_mesh_parts) == 1:

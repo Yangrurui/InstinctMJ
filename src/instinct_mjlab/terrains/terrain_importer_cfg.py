@@ -30,6 +30,14 @@ class TerrainImporterCfg(TerrainImporterCfgBase):
     - ``"mesh_like"``: Reconstruct hfield surface mesh then run mesh-style obstacle extraction.
     """
 
+    virtual_obstacle_hfield_height_threshold: float | None = None
+    """Legacy absolute height threshold (meters) for selective ``mesh_like`` repair.
+
+    This is only applied on discontinuous heightfield terrains such as stairs,
+    gaps, and discrete obstacles. Smooth slope/plane terrains keep pure
+    ``mesh_like`` reconstruction to avoid false obstacle edges.
+    """
+
     virtual_obstacle_hfield_trace_simplify_epsilon: float = 0.03
     """Polyline simplification tolerance (meters) for mesh-like edge tracing."""
 

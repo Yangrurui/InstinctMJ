@@ -64,6 +64,163 @@ def _sample_debug_rows(rows: torch.Tensor, capacity: int | None) -> torch.Tensor
     return rows.index_select(0, sample_ids)
 
 
+def _greedyconcat_component_labels(num_vertices: int, edge_pairs: np.ndarray) -> np.ndarray:
+    """Assign connected-component labels for undirected edge pairs."""
+    labels = np.full(num_vertices, -1, dtype=np.int32)
+    if num_vertices == 0 or edge_pairs.size == 0:
+        return labels
+
+    parent = np.arange(num_vertices, dtype=np.int32)
+    rank = np.zeros(num_vertices, dtype=np.int8)
+
+    def find(node: int) -> int:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = int(parent[node])
+        return node
+
+    for start, end in edge_pairs:
+        start = int(start)
+        end = int(end)
+        if start == end:
+            continue
+        root_start = find(start)
+        root_end = find(end)
+        if root_start == root_end:
+            continue
+        if rank[root_start] < rank[root_end]:
+            parent[root_start] = root_end
+        elif rank[root_start] > rank[root_end]:
+            parent[root_end] = root_start
+        else:
+            parent[root_end] = root_start
+            rank[root_start] += 1
+
+    root_to_label: dict[int, int] = {}
+    next_label = 0
+    active_vertices = np.unique(edge_pairs.reshape(-1))
+    for vertex in active_vertices:
+        vertex = int(vertex)
+        root = find(vertex)
+        if root not in root_to_label:
+            root_to_label[root] = next_label
+            next_label += 1
+        labels[vertex] = root_to_label[root]
+    return labels
+
+
+def _process_greedyconcat_component(
+    vertices: np.ndarray,
+    edge_pairs: np.ndarray,
+    cos_threshold: float,
+    point_distance_threshold: float,
+    min_points: int,
+    rng_seed: int | None = None,
+) -> np.ndarray:
+    """Run the legacy Greedyconcat walk on one disconnected edge component."""
+    if vertices.size == 0 or edge_pairs.size == 0:
+        return np.empty((0, 6), dtype=np.float32)
+
+    adj_list = {i: set() for i in range(vertices.shape[0])}
+    for start, end in edge_pairs:
+        start = int(start)
+        end = int(end)
+        if start == end:
+            continue
+        adj_list[start].add(end)
+        adj_list[end].add(start)
+
+    num_edges_v = np.array([len(adj_list[i]) for i in range(vertices.shape[0])], dtype=int)
+    available_edges = set(np.where(num_edges_v > 0)[0])
+    processed_edge_coords: list[np.ndarray] = []
+    rng = random.Random(rng_seed) if rng_seed is not None else None
+
+    def compute_max_distance_to_line_vec(points: np.ndarray, vertex_set: list[int]) -> tuple[int, float]:
+        start_point = points[vertex_set[0]]
+        end_point = points[vertex_set[-1]]
+        line = end_point - start_point
+        line_norm = np.linalg.norm(line)
+        if line_norm == 0:
+            return vertex_set[0], 0.0
+        pts = points[vertex_set]
+        dists = np.linalg.norm(np.cross(pts - start_point, pts - end_point), axis=1) / line_norm
+        max_idx = int(np.argmax(dists))
+        return vertex_set[max_idx], float(dists[max_idx])
+
+    while available_edges:
+        selectable_vertices = list(available_edges)
+        selected_vertex = rng.choice(selectable_vertices) if rng is not None else random.choice(selectable_vertices)
+        vertex_set = [selected_vertex]
+
+        if adj_list[selected_vertex]:
+            neighbor = next(iter(adj_list[selected_vertex]))
+            vertex_set.append(neighbor)
+            adj_list[selected_vertex].remove(neighbor)
+            adj_list[neighbor].remove(selected_vertex)
+            for vertex_id in [selected_vertex, neighbor]:
+                num_edges_v[vertex_id] -= 1
+                if num_edges_v[vertex_id] == 0:
+                    available_edges.discard(vertex_id)
+
+        while True:
+            find_neighbor = False
+            start_vertex, end_vertex = vertex_set[0], vertex_set[-1]
+
+            neighbors = list(adj_list[start_vertex])
+            if neighbors:
+                dirs = vertices[start_vertex] - vertices[neighbors]
+                dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
+                start_dir = vertices[vertex_set[1]] - vertices[start_vertex]
+                start_dir /= np.linalg.norm(start_dir)
+                dots = dirs @ start_dir
+                idx = np.where(dots > cos_threshold)[0]
+                if idx.size > 0:
+                    neighbor = neighbors[int(idx[0])]
+                    vertex_set.insert(0, neighbor)
+                    adj_list[start_vertex].remove(neighbor)
+                    adj_list[neighbor].remove(start_vertex)
+                    for vertex_id in [start_vertex, neighbor]:
+                        num_edges_v[vertex_id] -= 1
+                        if num_edges_v[vertex_id] == 0:
+                            available_edges.discard(vertex_id)
+                    find_neighbor = True
+
+            neighbors = list(adj_list[end_vertex])
+            if neighbors:
+                dirs = vertices[neighbors] - vertices[end_vertex]
+                dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
+                end_dir = vertices[end_vertex] - vertices[vertex_set[-2]]
+                end_dir /= np.linalg.norm(end_dir)
+                dots = dirs @ end_dir
+                idx = np.where(dots > cos_threshold)[0]
+                if idx.size > 0:
+                    neighbor = neighbors[int(idx[0])]
+                    vertex_set.append(neighbor)
+                    adj_list[end_vertex].remove(neighbor)
+                    adj_list[neighbor].remove(end_vertex)
+                    for vertex_id in [end_vertex, neighbor]:
+                        num_edges_v[vertex_id] -= 1
+                        if num_edges_v[vertex_id] == 0:
+                            available_edges.discard(vertex_id)
+                    find_neighbor = True
+
+            if not find_neighbor:
+                break
+
+        while len(vertex_set) >= min_points:
+            for split_idx in range(len(vertex_set) - 1):
+                _max_vertex, max_dist = compute_max_distance_to_line_vec(vertices, vertex_set[split_idx:])
+                if max_dist < point_distance_threshold:
+                    break
+            if len(vertex_set) - split_idx >= min_points:
+                processed_edge_coords.append(np.concatenate([vertices[vertex_set[split_idx]], vertices[vertex_set[-1]]]))
+            vertex_set = vertex_set[: split_idx + 1]
+
+    if len(processed_edge_coords) == 0:
+        return np.empty((0, 6), dtype=np.float32)
+    return np.asarray(processed_edge_coords, dtype=np.float32).reshape(-1, 6)
+
+
 class EdgeCylinder(VirtualObstacleBase):
     """Base class for edge detectors."""
 
@@ -436,103 +593,65 @@ class GreedyconcatEdgeCylinder(EdgeCylinder):
         line_pts = edge_coords.reshape(-1, 3)
         V, inv_idx = np.unique(line_pts, axis=0, return_inverse=True)
         E_pairs = inv_idx.reshape(-1, 2)
-
-        adj_list = {i: set() for i in range(V.shape[0])}
-        for u, v in E_pairs:
-            if u != v:
-                adj_list[u].add(v)
-                adj_list[v].add(u)
-
-        num_edges_V = np.array([len(adj_list[i]) for i in range(V.shape[0])], dtype=int)
-        available_edges = set(np.where(num_edges_V > 0)[0])
-
         cos_threshold = np.cos(np.deg2rad(self.cfg.adjacent_angle_threshold))
+        workers = int(self.cfg.component_workers)
+        if workers == 0:
+            workers = max(1, os.cpu_count() or 1)
 
-        processed_edge_coords = []
+        processed_parts: list[np.ndarray]
+        if workers <= 1 or E_pairs.shape[0] < 2048:
+            processed = _process_greedyconcat_component(
+                V,
+                E_pairs,
+                cos_threshold=cos_threshold,
+                point_distance_threshold=float(self.cfg.point_distance_threshold),
+                min_points=int(self.cfg.min_points),
+                rng_seed=None,
+            )
+            processed_parts = [processed]
+        else:
+            component_labels = _greedyconcat_component_labels(V.shape[0], E_pairs)
+            active_labels = np.unique(component_labels[component_labels >= 0])
+            if active_labels.size <= 1:
+                processed = _process_greedyconcat_component(
+                    V,
+                    E_pairs,
+                    cos_threshold=cos_threshold,
+                    point_distance_threshold=float(self.cfg.point_distance_threshold),
+                    min_points=int(self.cfg.min_points),
+                    rng_seed=None,
+                )
+                processed_parts = [processed]
+            else:
+                edge_component_labels = component_labels[E_pairs[:, 0]]
+                worker_count = min(workers, int(active_labels.size))
+                futures = []
+                with ProcessPoolExecutor(max_workers=worker_count) as executor:
+                    for label in active_labels:
+                        component_edge_ids = np.where(edge_component_labels == label)[0]
+                        if component_edge_ids.size == 0:
+                            continue
+                        component_edges = E_pairs[component_edge_ids]
+                        component_vertex_ids = np.flatnonzero(component_labels == label)
+                        component_vertices = V[component_vertex_ids]
+                        local_edges = np.searchsorted(component_vertex_ids, component_edges).astype(np.int32, copy=False)
+                        futures.append(
+                            executor.submit(
+                                _process_greedyconcat_component,
+                                component_vertices,
+                                local_edges,
+                                cos_threshold,
+                                float(self.cfg.point_distance_threshold),
+                                int(self.cfg.min_points),
+                                random.getrandbits(32),
+                            )
+                        )
+                processed_parts = [future.result() for future in futures]
 
-        def compute_max_distance_to_line_vec(V, v_set):
-            A = V[v_set[0]]
-            B = V[v_set[-1]]
-            AB = B - A
-            norm_AB = np.linalg.norm(AB)
-            if norm_AB == 0:
-                return v_set[0], 0.0
-            pts = V[v_set]
-            dists = np.linalg.norm(np.cross(pts - A, pts - B), axis=1) / norm_AB
-            max_idx = np.argmax(dists)
-            return v_set[max_idx], dists[max_idx]
-
-        while available_edges:
-            selected_vertex = random.choice(list(available_edges))
-            v_set = [selected_vertex]
-
-            if adj_list[selected_vertex]:
-                neighbor = next(iter(adj_list[selected_vertex]))
-                v_set.append(neighbor)
-                adj_list[selected_vertex].remove(neighbor)
-                adj_list[neighbor].remove(selected_vertex)
-                for vid in [selected_vertex, neighbor]:
-                    num_edges_V[vid] -= 1
-                    if num_edges_V[vid] == 0:
-                        available_edges.discard(vid)
-
-            while True:
-                find_neighbor = False
-                start, end = v_set[0], v_set[-1]
-
-                neighbors = list(adj_list[start])
-                if neighbors:
-                    dirs = V[start] - V[neighbors]
-                    dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
-                    start_dir = V[v_set[1]] - V[start]
-                    start_dir /= np.linalg.norm(start_dir)
-                    dots = dirs @ start_dir
-                    idx = np.where(dots > cos_threshold)[0]
-                    if idx.size > 0:
-                        n = neighbors[idx[0]]
-                        v_set.insert(0, n)
-                        adj_list[start].remove(n)
-                        adj_list[n].remove(start)
-                        for vid in [start, n]:
-                            num_edges_V[vid] -= 1
-                            if num_edges_V[vid] == 0:
-                                available_edges.discard(vid)
-                        find_neighbor = True
-
-                neighbors = list(adj_list[end])
-                if neighbors:
-                    dirs = V[neighbors] - V[end]
-                    dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
-                    end_dir = V[end] - V[v_set[-2]]
-                    end_dir /= np.linalg.norm(end_dir)
-                    dots = dirs @ end_dir
-                    idx = np.where(dots > cos_threshold)[0]
-                    if idx.size > 0:
-                        n = neighbors[idx[0]]
-                        v_set.append(n)
-                        adj_list[end].remove(n)
-                        adj_list[n].remove(end)
-                        for vid in [end, n]:
-                            num_edges_V[vid] -= 1
-                            if num_edges_V[vid] == 0:
-                                available_edges.discard(vid)
-                        find_neighbor = True
-
-                if not find_neighbor:
-                    break
-
-            while len(v_set) >= self.cfg.min_points:
-                for i in range(len(v_set) - 1):
-                    max_vi, max_dist = compute_max_distance_to_line_vec(V, v_set[i:])
-                    if max_dist < self.cfg.point_distance_threshold:
-                        break
-                if len(v_set) - i >= self.cfg.min_points:
-                    processed_edge_coords.append(np.concatenate([V[v_set[i]], V[v_set[-1]]]))
-                v_set = v_set[: i + 1]
-
-        if len(processed_edge_coords) == 0:
+        processed_parts = [part for part in processed_parts if part.size > 0]
+        if len(processed_parts) == 0:
             return np.empty((0, 6), dtype=np.float32)
-        processed = np.asarray(processed_edge_coords, dtype=np.float32).reshape(-1, 6)
+        processed = np.concatenate(processed_parts, axis=0).astype(np.float32, copy=False)
         return self._post_merge_collinear_segments(processed)
 
 
@@ -768,107 +887,58 @@ class RayEdgeCylinder(VirtualObstacleBase):
                 )
 
 
-class FeatureEdgeCylinder(VirtualObstacleBase):
-    """class for feature-extracted edge detectors."""
+class FeatureEdgeCylinder(GreedyconcatEdgeCylinder):
+    """Feature-extracted edge detector using the original pyvista flow."""
 
     def __init__(self, cfg: FeatureEdgeCylinderCfg):
         super().__init__(cfg)
         self.cfg: FeatureEdgeCylinderCfg = cfg
+        self.supports_edge_segment_generation = False
 
     def generate(self, mesh: trimesh.Trimesh, device="cpu") -> None:
-        """Detect sharp edges in the mesh and store the edge cylinder as virtual obstacle.
-
-        Args:
-            mesh: The trimesh object to analyze.
-
-        Returns:
-            A np array batch indicating the edges: (num_edges, 6)
-            - x, y, z coordinates of the edge start point
-            - x, y, z coordinates of the edge end point
-        """
+        """Detect sharp edges in the mesh using pyvista feature extraction."""
         import pyvista as pv
 
-        self.device = device if isinstance(device, torch.device) else torch.device(device)
-        # extract vertices and faces from the trimesh object
         points = mesh.vertices.astype(np.float32)
         indices = mesh.faces.astype(np.int32)
-        pv_mesh = pv.PolyData(points, np.hstack((np.full((indices.shape[0], 1), 3), indices)))
+        pv_mesh = pv.PolyData(points, np.hstack((np.full((indices.shape[0], 1), 3, dtype=np.int32), indices)))
         edges = pv_mesh.extract_feature_edges(
             feature_angle=self.cfg.feature_angle,
-            boundary_edges=True,
-            non_manifold_edges=True,
+            boundary_edges=False,
+            non_manifold_edges=False,
             feature_edges=True,
             manifold_edges=False,
         )
+
         edge_end_points = np.empty((0, 6), dtype=np.float32)
         if edges.n_cells > 0:
             lines = edges.lines
             points = edges.points
-            edge_coords = []
-            i = 0
-            while i < len(lines):
-                num_pts = int(lines[i])
+            edge_coords: list[np.ndarray] = []
+            line_idx = 0
+            while line_idx < len(lines):
+                num_pts = int(lines[line_idx])
                 if num_pts == 2:
-                    pt_idx1 = int(lines[i + 1])
-                    pt_idx2 = int(lines[i + 2])
+                    pt_idx1 = int(lines[line_idx + 1])
+                    pt_idx2 = int(lines[line_idx + 2])
                     start = points[pt_idx1]
                     end = points[pt_idx2]
                     edge_coords.append(np.concatenate([start, end]))
-                i += num_pts + 1
+                line_idx += num_pts + 1
 
             if edge_coords:
-                edge_end_points = np.array(edge_coords, dtype=np.float32)
+                edge_end_points = self.process_edges(np.asarray(edge_coords, dtype=np.float32))
+                min_edge_length = float(self.cfg.min_edge_length)
+                if min_edge_length > 0.0 and edge_end_points.size > 0:
+                    edge_lengths = np.linalg.norm(edge_end_points[:, 3:6] - edge_end_points[:, 0:3], axis=1)
+                    edge_end_points = edge_end_points[edge_lengths >= min_edge_length]
                 print(f"Detected {edge_end_points.shape[0]} edges from feature extraction.")
             else:
                 print("[WARNING] No edges extracted from features.")
         else:
             print("[WARNING] No sharp edges detected.")
 
-        self.edges_pyt = torch.tensor(edge_end_points, dtype=torch.float32, device=self.device)
-
-        # create a cylinder spatial grid for the edges and for penetration offset computation
-        if edge_end_points.size > 0:
-            self.cylinders = CylinderSpatialGrid(
-                cylinders=np.concatenate(
-                    [
-                        edge_end_points,
-                        np.ones_like(edge_end_points[:, :1]) * self.cfg.cylinder_radius,
-                    ],
-                    axis=1,
-                ),
-                num_grid_cells=self.cfg.num_grid_cells,
-                device=self.device,
-            )
-        else:
-            self.cylinders = None
-
-    def disable_visualizer(self):
-        return
-
-    def visualize(self):
-        return
-
-    def get_points_penetration_offset(self, points):
-        return (
-            self.cylinders.get_points_penetration_offset(points)
-            if self.cylinders is not None
-            else torch.zeros_like(points, device=self.device)
-        )
-
-    def debug_vis(self, visualizer: "DebugVisualizer") -> None:
-        if self.edges_pyt.numel() == 0:
-            return
-        marker_cfg = self.cfg.visualizer.markers["cylinder"]
-        rgba = _marker_rgba_from_cfg(marker_cfg)
-        radius = float(self.cfg.cylinder_radius)
-        edge_rows = _sample_debug_rows(self.edges_pyt, _remaining_debug_geom_capacity(visualizer))
-        for edge in edge_rows:
-            visualizer.add_cylinder(
-                start=edge[:3],
-                end=edge[3:6],
-                radius=radius,
-                color=rgba,
-            )
+        self._set_edge_cylinders(edge_end_points, device=device)
 
 
 def process_camera_edges(i, depth_image, normal_image, cfg):

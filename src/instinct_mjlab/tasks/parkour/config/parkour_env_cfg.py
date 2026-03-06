@@ -1122,17 +1122,24 @@ def set_parkour_terrain(cfg: ManagerBasedRlEnvCfg, play: bool) -> None:
   edge_obstacle_cfg = GreedyconcatEdgeCylinderCfg(
     cylinder_radius=0.05,
     min_points=2,
+    component_workers=0,
+    merge_collinear_gap=0.09,
+    merge_collinear_angle_threshold=30.0,
+    merge_collinear_line_distance=0.04,
   )
   cfg.scene.terrain = TerrainImporterCfg(
     terrain_type="hacked_generator",
     terrain_generator=copy.deepcopy(terrain_gen),
     max_init_terrain_level=5,
-    # Keep terrain generation unchanged and extract virtual obstacles from hfield
-    # by reconstructing hfield surface mesh first, then running mesh-based
-    # virtual-obstacle extraction.
-    virtual_obstacle_source="heightfield",
-    virtual_obstacle_hfield_method="mesh_like",
-    collision_debug_vis=False,
+    # Keep terrain generation unchanged and extract virtual obstacles from the
+    # generator-side terrain surface mesh built from the same hfield->mesh path.
+    # This keeps mesh-based edge extraction on the terrain surface only and
+    # avoids generating obstacle edges on auxiliary wall box colliders. Keep
+    # low-step repair only for discontinuous hfield tiles so short stair risers
+    # remain connected without affecting smooth slope/perlin-plane tiles.
+    virtual_obstacle_source="mesh",
+    virtual_obstacle_hfield_height_threshold=0.04,
+    collision_debug_vis=True,
     collision_debug_rgba=(0.62, 0.2, 0.9, 0.35),
     virtual_obstacles={
       "edges": edge_obstacle_cfg,

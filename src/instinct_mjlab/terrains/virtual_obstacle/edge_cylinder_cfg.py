@@ -132,6 +132,13 @@ class GreedyconcatEdgeCylinderCfg(EdgeCylinderCfg):
     This keeps startup cost bounded on very dense terrains.
     """
 
+    component_workers: int = 1
+    """Worker count for disconnected edge-component processing.
+
+    Set to ``1`` to keep single-worker legacy behavior.
+    Set to ``0`` to auto-use available CPU cores.
+    """
+
 
 @dataclass(kw_only=True)
 class RayEdgeCylinderCfg(VirtualObstacleCfg):
@@ -222,13 +229,16 @@ class RayEdgeCylinderCfg(VirtualObstacleCfg):
 
 
 @dataclass(kw_only=True)
-class FeatureEdgeCylinderCfg(EdgeCylinderCfg):
+class FeatureEdgeCylinderCfg(GreedyconcatEdgeCylinderCfg):
     """The class to use for the feature-extracted edge cylinder generator."""
 
     class_type: type = FeatureEdgeCylinder
 
-    cylinder_radius: float = 0.2
-    """The radius of the edge cylinder, which is used to treat the edge cylinders as a virtual obstacle."""
+    min_points: int = 2
+    """The minimum number of points in one merged feature line."""
 
     feature_angle: float = 15.0
     """The angle threshold to consider a feature as an edge feature."""
+
+    min_edge_length: float = 0.0
+    """Minimum merged feature-edge length (meters) kept after processing."""

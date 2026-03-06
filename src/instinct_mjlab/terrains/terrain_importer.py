@@ -199,6 +199,13 @@ class TerrainImporter(TerrainImporterBase):
     def _get_terrain_mesh_for_virtual_obstacles(self) -> trimesh.Trimesh | None:
         if self.terrain_generator is None:
             return None
+        # When low-step repair is requested, rebuild the virtual-obstacle mesh
+        # from hfield specs so short stair risers/lips can use the same selective
+        # height-threshold repair as the mesh_like heightfield path.
+        if self._get_hfield_mesh_like_height_threshold() is not None:
+            repaired_mesh = self._collect_hfield_surface_mesh(use_cached_terrain_mesh=False)
+            if repaired_mesh is not None:
+                return repaired_mesh
         terrain_mesh = self.terrain_generator.terrain_mesh
         return terrain_mesh
 
@@ -432,6 +439,7 @@ class TerrainImporter(TerrainImporterBase):
         hfield_spec,
         geom_pos: np.ndarray,
         slope_threshold: float | None = None,
+        height_threshold: float | None = None,
     ) -> trimesh.Trimesh | None:
         """Convert one MuJoCo hfield spec + geom pose into world-frame trimesh."""
         nrow = int(hfield_spec.nrow)
@@ -457,7 +465,17 @@ class TerrainImporter(TerrainImporterBase):
         if y_step <= 0.0 or x_step <= 0.0:
             return None
 
-        if slope_threshold is not None:
+        if height_threshold is not None:
+            height_threshold = float(height_threshold)
+            if height_threshold <= 0.0:
+                height_threshold = None
+
+        if height_threshold is not None:
+            # Legacy low-step repair should only affect discontinuous hfield
+            # terrains. It overrides slope-threshold projection locally so
+            # short stair risers/gap lips remain connected in mesh_like mode.
+            slope_threshold = height_threshold / float(y_step)
+        elif slope_threshold is not None:
             slope_threshold = float(slope_threshold)
             if slope_threshold <= 0.0:
                 slope_threshold = None
@@ -497,26 +515,70 @@ class TerrainImporter(TerrainImporterBase):
             return None
         return slope_threshold
 
-    def _collect_hfield_surface_mesh(self) -> trimesh.Trimesh | None:
-        """Collect and concatenate hfield surface meshes from terrain spec."""
+    def _get_hfield_mesh_like_height_threshold(self) -> float | None:
+        """Resolve absolute height-threshold override for discrete hfield repair."""
+        height_threshold = self.cfg.virtual_obstacle_hfield_height_threshold
+        if height_threshold is None:
+            return None
+        height_threshold = float(height_threshold)
+        if height_threshold <= 0.0:
+            return None
+        return height_threshold
+
+    @staticmethod
+    def _should_apply_mesh_like_height_repair(subterrain_cfg: SubTerrainBaseCfg | None) -> bool:
+        """Whether legacy low-step repair should apply to this subterrain."""
+        if subterrain_cfg is None:
+            return True
+        cfg_type_name = type(subterrain_cfg).__name__
+        if cfg_type_name == "PerlinPlaneTerrainCfg":
+            return False
+        if any(token in cfg_type_name for token in ("Slope", "Sloped", "Tilt", "Ramp", "Wave")):
+            return False
+        return True
+
+    def _iter_hfield_geoms_with_subterrain_cfgs(self):
+        """Iterate terrain hfield geoms together with their subterrain cfgs."""
         terrain_body = self._spec.body("terrain")
         if terrain_body is None:
-            return None
+            return
 
-        slope_threshold = self._get_hfield_mesh_like_slope_threshold()
-        meshes: list[trimesh.Trimesh] = []
+        subterrain_cfgs = self.subterrain_specific_cfgs or []
+        hfield_geom_index = 0
         for geom in terrain_body.geoms:
             hfield_name = geom.hfieldname
             if not isinstance(hfield_name, str) or hfield_name == "":
                 continue
+            subterrain_cfg = subterrain_cfgs[hfield_geom_index] if hfield_geom_index < len(subterrain_cfgs) else None
+            hfield_geom_index += 1
+            yield geom, subterrain_cfg
+
+    def _collect_hfield_surface_mesh(self, *, use_cached_terrain_mesh: bool = True) -> trimesh.Trimesh | None:
+        """Collect and concatenate hfield surface meshes from terrain spec."""
+        if use_cached_terrain_mesh:
+            terrain_mesh = self.terrain_generator.terrain_mesh if self.terrain_generator is not None else None
+        else:
+            terrain_mesh = None
+        if terrain_mesh is not None:
+            return terrain_mesh.copy()
+
+        slope_threshold = self._get_hfield_mesh_like_slope_threshold()
+        height_threshold = self._get_hfield_mesh_like_height_threshold()
+        meshes: list[trimesh.Trimesh] = []
+        for geom, subterrain_cfg in self._iter_hfield_geoms_with_subterrain_cfgs():
+            hfield_name = geom.hfieldname
             hfield_spec = self._spec.hfield(hfield_name)
             if hfield_spec is None:
                 continue
             geom_pos = np.asarray(geom.pos, dtype=np.float64).reshape(3)
+            geom_height_threshold = (
+                height_threshold if self._should_apply_mesh_like_height_repair(subterrain_cfg) else None
+            )
             world_mesh = self._hfield_spec_to_world_mesh(
                 hfield_spec,
                 geom_pos,
                 slope_threshold=slope_threshold,
+                height_threshold=geom_height_threshold,
             )
             if world_mesh is not None:
                 meshes.append(world_mesh)
@@ -536,17 +598,12 @@ class TerrainImporter(TerrainImporterBase):
         min_edge_length: float,
     ) -> np.ndarray:
         """Collect sharp edges from hfield-surface mesh while filtering cell diagonals."""
-        terrain_body = self._spec.body("terrain")
-        if terrain_body is None:
-            return np.empty((0, 6), dtype=np.float32)
-
         slope_threshold = self._get_hfield_mesh_like_slope_threshold()
+        height_threshold = self._get_hfield_mesh_like_height_threshold()
         sharp_threshold = np.deg2rad(float(angle_threshold))
         edge_segments_list: list[np.ndarray] = []
-        for geom in terrain_body.geoms:
+        for geom, subterrain_cfg in self._iter_hfield_geoms_with_subterrain_cfgs():
             hfield_name = geom.hfieldname
-            if not isinstance(hfield_name, str) or hfield_name == "":
-                continue
             hfield_spec = self._spec.hfield(hfield_name)
             if hfield_spec is None:
                 continue
@@ -554,10 +611,14 @@ class TerrainImporter(TerrainImporterBase):
             if ncol <= 1:
                 continue
             geom_pos = np.asarray(geom.pos, dtype=np.float64).reshape(3)
+            geom_height_threshold = (
+                height_threshold if self._should_apply_mesh_like_height_repair(subterrain_cfg) else None
+            )
             world_mesh = self._hfield_spec_to_world_mesh(
                 hfield_spec,
                 geom_pos,
                 slope_threshold=slope_threshold,
+                height_threshold=geom_height_threshold,
             )
             if world_mesh is None:
                 continue

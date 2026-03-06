@@ -14,6 +14,7 @@ from mjlab.terrains.terrain_generator import (
     TerrainGeometry,
     TerrainOutput,
 )
+from .utils import convert_height_field_to_mesh
 
 
 def _unwrap_height_field_function(function_obj: object) -> object:
@@ -289,29 +290,28 @@ def _height_field_to_hfield_surface_mesh(
     heights: np.ndarray,
     cfg: "HfTerrainBaseCfg",
 ) -> trimesh.Trimesh:
-    """Convert heights into a mesh sampled on the same XY grid as MuJoCo hfield."""
-    heights_f64 = np.asarray(heights, dtype=np.float64)
-    nrow, ncol = heights_f64.shape
+    """Convert heights into a source-style surface mesh for virtual obstacles."""
+    heights_i16 = np.asarray(heights, dtype=np.int16)
+    nrow, ncol = heights_i16.shape
+    if nrow <= 1 or ncol <= 1:
+        return trimesh.Trimesh(vertices=np.empty((0, 3), dtype=np.float32), faces=np.empty((0, 3), dtype=np.int32))
 
-    x = np.linspace(0.0, float(cfg.size[0]), nrow, dtype=np.float64)
-    y = np.linspace(0.0, float(cfg.size[1]), ncol, dtype=np.float64)
-    xx, yy = np.meshgrid(x, y, indexing="ij")
-    zz = heights_f64 * float(cfg.vertical_scale)
-
-    vertices = np.stack([xx, yy, zz], axis=-1).reshape(-1, 3)
-    faces = np.empty((2 * (nrow - 1) * (ncol - 1), 3), dtype=np.int32)
-    cursor = 0
-    for row in range(nrow - 1):
-        base = row * ncol
-        for col in range(ncol - 1):
-            ind0 = base + col
-            ind1 = ind0 + 1
-            ind2 = ind0 + ncol
-            ind3 = ind2 + 1
-            faces[cursor] = (ind0, ind3, ind1)
-            faces[cursor + 1] = (ind0, ind2, ind3)
-            cursor += 2
-    return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    horizontal_step_y = float(cfg.size[1]) / float(nrow - 1)
+    horizontal_step_x = float(cfg.size[0]) / float(ncol - 1)
+    vertices, faces = convert_height_field_to_mesh(
+        heights_i16,
+        horizontal_scale=horizontal_step_y,
+        vertical_scale=float(cfg.vertical_scale),
+        slope_threshold=cfg.slope_threshold,
+    )
+    vertices = np.asarray(vertices, dtype=np.float32)
+    if horizontal_step_y > 0.0:
+        x_ratio = float(horizontal_step_x / horizontal_step_y)
+        x_local = vertices[:, 1] * x_ratio
+        y_local = vertices[:, 0].copy()
+        vertices[:, 0] = x_local
+        vertices[:, 1] = y_local
+    return trimesh.Trimesh(vertices=vertices, faces=faces.astype(np.int32, copy=False), process=False)
 
 
 @dataclass(kw_only=True)
