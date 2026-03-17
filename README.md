@@ -245,23 +245,3 @@ register_instinct_task(
     instinct_rl_cfg_factory=my_instinct_rl_cfg,
 )
 ```
-
-## Repository Layout
-
-- `src/instinct_mj/tasks` — task registration and family-specific configs
-- `src/instinct_mj/envs` — environment wrappers, manager extensions, and shared MDP terms
-- `src/instinct_mj/motion_reference` — motion data loaders, buffers, and reference managers
-- `src/instinct_mj/assets` — MuJoCo robot assets and resource files
-- `src/instinct_mj/scripts` — train, play, visualization, and data-processing entry points
-
-## Data and Outputs
-
-- Training logs are written to `logs/instinct_rl/<experiment_name>/<timestamp_run>/`
-- Play videos are saved under `videos/play/` in the selected run directory
-
-## Related Projects
-
-Other repositories in the Project-Instinct ecosystem:
-
-- `InstinctLab`: `https://github.com/project-instinct/InstinctLab`
-- `instinct_rl`: `https://github.com/project-instinct/instinct_rl`
