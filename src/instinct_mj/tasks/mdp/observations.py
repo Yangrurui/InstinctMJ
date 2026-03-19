@@ -64,14 +64,21 @@ def _depth_from_raycast_distance_to_image_plane(
     *,
     depth_clipping_behavior: str = "max",
 ) -> torch.Tensor:
-    """Compute `distance_to_image_plane` from `RayCastSensor` outputs.
+    """Compute `distance_to_image_plane` from single-frame `RayCastSensor` outputs.
 
     Returns channel-first depth image in meters with shape `[num_envs, 1, H, W]`.
     """
     width, height, fovy = _resolve_raycast_pattern(sensor)
+    if sensor.num_frames != 1:
+        raise ValueError(
+            "Perceptive raycast depth only supports single-frame RayCastSensor inputs. "
+            f"Got {sensor.num_frames} frames for sensor '{sensor.cfg.name}'."
+        )
     distances = sensor.data.distances.clone()
-    if distances.shape[1] != width * height:
-        raise ValueError(f"Ray count mismatch: got {distances.shape[1]}, expected {width * height}")
+    if sensor.num_rays_per_frame != width * height:
+        raise ValueError(
+            f"Ray count mismatch: got {sensor.num_rays_per_frame}, expected {width * height}"
+        )
 
     directions = _get_pinhole_ray_directions(
         width,
@@ -97,7 +104,7 @@ def _depth_from_raycast_distance_to_image_plane(
             f"{depth_clipping_behavior!r}. Expected one of ['max', 'zero', 'none']."
         )
 
-    depth = depth.view(sensor.data.distances.shape[0], height, width, 1)
+    depth = depth.view(distances.shape[0], height, width, 1)
     return depth.permute(0, 3, 1, 2)
 
 
