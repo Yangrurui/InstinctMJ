@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Literal
 
 import torch
 import warp as wp
@@ -71,20 +72,7 @@ class GroupedRayCaster(RayCastSensor):
 
     def prepare_rays(self) -> None:
         """PRE-GRAPH: Transform per-env local rays to world frame."""
-        if self._frame_type == "body":
-            frame_pos = self._data.xpos[:, self._frame_body_id]
-            frame_mat = self._data.xmat[:, self._frame_body_id].view(-1, 3, 3)
-        else:
-            body_pos = self._data.xpos[:, self._frame_body_id]
-            body_mat = self._data.xmat[:, self._frame_body_id].view(-1, 3, 3)
-            if self._frame_type == "site":
-                frame_mat = self._data.site_xmat[:, self._frame_site_id].view(-1, 3, 3)
-            else:  # geom
-                frame_mat = self._data.geom_xmat[:, self._frame_geom_id].view(-1, 3, 3)
-            # Keep InstinctLab semantics: the attached frame origin comes from the
-            # parent body's full pose plus the local site/geom offset. ray_alignment
-            # only affects how ray starts/directions are rotated below.
-            frame_pos = body_pos + torch.einsum("bij,j->bi", body_mat, self._frame_local_pos)
+        frame_pos, frame_mat = self._compute_attached_frame_world_pose()
 
         # note: we clone here because we are read-only operations
         frame_pos = frame_pos.clone()
@@ -109,6 +97,53 @@ class GroupedRayCaster(RayCastSensor):
         self._cached_world_rays = ray_directions_w
         self._cached_frame_pos = frame_pos
         self._cached_frame_mat = frame_mat
+
+    def _get_single_frame_info(self) -> tuple[Literal["body", "site", "geom"], int, int]:
+        if len(self._frame_infos) != 1:
+            raise ValueError(
+                "GroupedRayCaster currently supports exactly one attachment frame. "
+                f"Received {len(self._frame_infos)} frames for sensor '{self.cfg.name}'."
+            )
+        return self._frame_infos[0]
+
+    def _get_frame_local_pos(
+        self,
+        frame_type: Literal["body", "site", "geom"],
+        obj_id: int,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        if frame_type == "site":
+            local_pos = self._mj_model.site_pos[obj_id]
+        elif frame_type == "geom":
+            local_pos = self._mj_model.geom_pos[obj_id]
+        else:
+            local_pos = (0.0, 0.0, 0.0)
+        return torch.tensor(local_pos, device=self._device, dtype=dtype)
+
+    def _compute_attached_frame_world_pose(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if env_ids is None:
+            env_ids = self._ALL_INDICES
+        env_ids = torch.as_tensor(env_ids, device=self._device, dtype=torch.long)
+        frame_type, obj_id, body_id = self._get_single_frame_info()
+        if frame_type == "body":
+            frame_pos = self._data.xpos[env_ids, body_id]
+            frame_mat = self._data.xmat[env_ids, body_id].view(-1, 3, 3)
+        else:
+            body_pos = self._data.xpos[env_ids, body_id]
+            body_mat = self._data.xmat[env_ids, body_id].view(-1, 3, 3)
+            if frame_type == "site":
+                frame_mat = self._data.site_xmat[env_ids, obj_id].view(-1, 3, 3)
+            else:
+                frame_mat = self._data.geom_xmat[env_ids, obj_id].view(-1, 3, 3)
+            # Keep InstinctLab semantics: the attached frame origin comes from the
+            # parent body's full pose plus the local site/geom offset. ray_alignment
+            # only affects how ray starts/directions are rotated below.
+            frame_local_pos = self._get_frame_local_pos(frame_type, obj_id, body_mat.dtype)
+            frame_pos = body_pos + torch.einsum("bij,j->bi", body_mat, frame_local_pos)
+        return frame_pos, frame_mat
 
     def postprocess_rays(self) -> None:
         super().postprocess_rays()

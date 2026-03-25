@@ -67,6 +67,12 @@ def g1_perceptive_shadowing_instinct_rl_cfg() -> InstinctRlOnPolicyRunnerCfg:
     )
 
 
+def g1_perceptive_shadowing_one_motion_instinct_rl_cfg() -> InstinctRlOnPolicyRunnerCfg:
+    cfg = g1_perceptive_shadowing_instinct_rl_cfg()
+    cfg.experiment_name = "g1_perceptive_shadowing_one_motion"
+    return cfg
+
+
 def _perceptive_vae_teacher_policy_cfg() -> dict[str, object]:
     return {
         "init_noise_std": 1.0,

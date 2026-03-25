@@ -581,22 +581,11 @@ class GroupedRayCasterCamera(GroupedRayCaster):
             A tuple of the position (in meters) and quaternion (w, x, y, z).
         """
         env_ids = torch.as_tensor(env_ids, device=self._device, dtype=torch.long)
-        if self._frame_type == "body":
-            pos_w = self._data.xpos[env_ids, self._frame_body_id]
-            quat_w = self._data.xquat[env_ids, self._frame_body_id]
+        frame_type, _obj_id, body_id = self._get_single_frame_info()
+        pos_w, frame_mat = self._compute_attached_frame_world_pose(env_ids)
+        if frame_type == "body":
+            quat_w = self._data.xquat[env_ids, body_id]
         else:
-            body_pos = self._data.xpos[env_ids, self._frame_body_id]
-            body_mat = self._data.xmat[env_ids, self._frame_body_id].view(-1, 3, 3)
-            if self._frame_type == "site":
-                frame_mat = self._data.site_xmat[env_ids, self._frame_site_id].view(-1, 3, 3)
-            elif self._frame_type == "geom":
-                frame_mat = self._data.geom_xmat[env_ids, self._frame_geom_id].view(-1, 3, 3)
-            else:
-                raise RuntimeError(f"Unsupported view type: {self._frame_type}")
-            # Match InstinctLab semantics for attached site/geom frames. The view
-            # origin follows the parent body's full transform; camera offset and
-            # ray_alignment are applied afterwards from that world pose.
-            pos_w = body_pos + torch.einsum("bij,j->bi", body_mat, self._frame_local_pos)
             quat_w = math_utils.quat_from_matrix(frame_mat)
         # return the pose
         return pos_w.clone(), quat_w.clone()

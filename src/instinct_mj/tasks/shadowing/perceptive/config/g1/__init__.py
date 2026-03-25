@@ -2,9 +2,18 @@
 
 from instinct_mj.tasks.registry import register_instinct_task
 
-from .perceptive_shadowing_cfg import G1PerceptiveShadowingEnvCfg, G1PerceptiveShadowingEnvCfg_PLAY
+from .perceptive_shadowing_cfg import (
+    G1PerceptiveShadowingEnvCfg,
+    G1PerceptiveShadowingEnvCfg_PLAY,
+    G1PerceptiveShadowingOneMotionEnvCfg,
+    G1PerceptiveShadowingOneMotionEnvCfg_PLAY,
+)
 from .perceptive_vae_cfg import G1PerceptiveVaeEnvCfg, G1PerceptiveVaeEnvCfg_PLAY
-from .rl_cfgs import g1_perceptive_shadowing_instinct_rl_cfg, g1_perceptive_vae_instinct_rl_cfg
+from .rl_cfgs import (
+    g1_perceptive_shadowing_instinct_rl_cfg,
+    g1_perceptive_shadowing_one_motion_instinct_rl_cfg,
+    g1_perceptive_vae_instinct_rl_cfg,
+)
 
 register_instinct_task(
     task_id="Instinct-Perceptive-Shadowing-G1-v0",
@@ -18,6 +27,20 @@ register_instinct_task(
     env_cfg_factory=G1PerceptiveShadowingEnvCfg_PLAY,
     play_env_cfg_factory=G1PerceptiveShadowingEnvCfg_PLAY,
     instinct_rl_cfg_factory=g1_perceptive_shadowing_instinct_rl_cfg,
+)
+
+register_instinct_task(
+    task_id="Instinct-Perceptive-Shadowing-G1-OneMotion-v0",
+    env_cfg_factory=G1PerceptiveShadowingOneMotionEnvCfg,
+    play_env_cfg_factory=G1PerceptiveShadowingOneMotionEnvCfg_PLAY,
+    instinct_rl_cfg_factory=g1_perceptive_shadowing_one_motion_instinct_rl_cfg,
+)
+
+register_instinct_task(
+    task_id="Instinct-Perceptive-Shadowing-G1-OneMotion-Play-v0",
+    env_cfg_factory=G1PerceptiveShadowingOneMotionEnvCfg_PLAY,
+    play_env_cfg_factory=G1PerceptiveShadowingOneMotionEnvCfg_PLAY,
+    instinct_rl_cfg_factory=g1_perceptive_shadowing_one_motion_instinct_rl_cfg,
 )
 
 register_instinct_task(

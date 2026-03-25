@@ -1671,7 +1671,7 @@ wheels = [
 [[package]]
 name = "mjlab"
 version = "1.2.0"
-source = { git = "https://github.com/mujocolab/mjlab.git#be04d464e70e36b4fe009a207282dca6038cd113" }
+source = { git = "https://github.com/mujocolab/mjlab.git#6abd0ebfde7ef07b3ecb6032c0efe3fda2794c5c" }
 dependencies = [
     { name = "imageio-ffmpeg" },
     { name = "mediapy" },

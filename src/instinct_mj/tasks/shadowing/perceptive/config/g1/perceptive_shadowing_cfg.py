@@ -28,9 +28,91 @@ from instinct_mj.motion_reference.utils import motion_interpolate_bilinear
 
 G1_CFG = G1_29DOF_TORSOBASE_POPSICLE_CFG
 
-# NOTE: Change this to your local perceptive shadowing dataset folder.
+# NOTE: Change this if your local perceptive shadowing dataset lives elsewhere.
 # The folder should contain the motion files and a `metadata.yaml`.
-MOTION_FOLDER = "~/your/path/to/20251116_50cm_kneeClimbStep1"
+MOTION_FOLDER = "~/Xyk/Datasets/her_leveled"
+
+# NOTE: For the one-motion debug task below, keep this as `None` to use the
+# first motion listed in `metadata.yaml`, or set it to a relative motion file
+# path (for example: "indoor5/indoor5-retargeted.npz").
+_hacked_single_motion_file_ = None
+
+
+def _write_single_motion_metadata(
+    *,
+    metadata_yaml: str,
+    output_yaml: str,
+    selected_motion_file: str | None = None,
+) -> str:
+    """Write a metadata.yaml that keeps only one terrain-matched motion."""
+    with open(metadata_yaml, encoding="utf-8") as f:
+        metadata = yaml.safe_load(f)
+
+    motion_files = metadata["motion_files"]
+    if len(motion_files) == 0:
+        raise ValueError(f"No motion_files found in metadata: {metadata_yaml}")
+
+    if selected_motion_file is None:
+        selected_entry = motion_files[0]
+    else:
+        matched_entries = [entry for entry in motion_files if entry["motion_file"] == selected_motion_file]
+        if len(matched_entries) == 0:
+            raise ValueError(
+                f"Motion file '{selected_motion_file}' is not present in metadata '{metadata_yaml}'."
+            )
+        selected_entry = matched_entries[0]
+
+    terrain_id = selected_entry["terrain_id"]
+    terrains = [terrain for terrain in metadata["terrains"] if terrain["terrain_id"] == terrain_id]
+    if len(terrains) == 0:
+        raise ValueError(
+            f"Terrain id '{terrain_id}' referenced by '{selected_entry['motion_file']}' was not found in '{metadata_yaml}'."
+        )
+
+    os.makedirs(os.path.dirname(output_yaml), exist_ok=True)
+    with open(output_yaml, "w", encoding="utf-8") as f:
+        yaml.safe_dump(
+            {
+                "terrains": terrains,
+                "motion_files": [selected_entry],
+            },
+            f,
+            sort_keys=False,
+        )
+
+    return selected_entry["motion_file"]
+
+
+def _apply_single_motion_metadata(
+    scene: perceptual_cfg.PerceptiveShadowingSceneCfg,
+    *,
+    output_tag: str,
+    selected_motion_file: str | None = None,
+) -> str:
+    """Replace the motion-matched metadata with a single selected trajectory."""
+    motion_reference_cfg = next(sensor_cfg for sensor_cfg in scene.sensors if sensor_cfg.name == "motion_reference")
+    motion_name = list(motion_reference_cfg.motion_buffers.keys())[0]
+    motion_buffer = motion_reference_cfg.motion_buffers[motion_name]
+    metadata_yaml = os.path.join(motion_buffer.path, "metadata.yaml")
+    selected_stem = (
+        os.path.splitext(os.path.basename(selected_motion_file))[0]
+        if selected_motion_file is not None
+        else "first_motion"
+    )
+    filtered_metadata_yaml = os.path.join("/tmp", f"{output_tag}_{selected_stem}.yaml")
+    selected_relative_motion = _write_single_motion_metadata(
+        metadata_yaml=metadata_yaml,
+        output_yaml=filtered_metadata_yaml,
+        selected_motion_file=selected_motion_file,
+    )
+    motion_buffer.metadata_yaml = filtered_metadata_yaml
+
+    if scene.terrain.terrain_type == "hacked_generator":
+        terrain_cfg = scene.terrain.terrain_generator.sub_terrains["motion_matched"]
+        terrain_cfg.path = motion_buffer.path
+        terrain_cfg.metadata_yaml = motion_buffer.metadata_yaml
+
+    return selected_relative_motion
 
 
 @dataclass(kw_only=True)
@@ -321,6 +403,36 @@ class G1PerceptiveShadowingEnvCfg_PLAY(G1PerceptiveShadowingEnvCfg):
                 asset_cfg=SceneEntityCfg("robot", joint_names="left_knee.*"),
             ),
         )
+
+
+@dataclass(kw_only=True)
+class G1PerceptiveShadowingOneMotionEnvCfg(G1PerceptiveShadowingEnvCfg):
+    """Perceptive shadowing debug config that keeps a single terrain-matched motion."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        selected_motion = _apply_single_motion_metadata(
+            self.scene,
+            output_tag="g1_perceptive_shadowing_one_motion_train",
+            selected_motion_file=_hacked_single_motion_file_,
+        )
+        selected_motion_stem = os.path.splitext(os.path.basename(selected_motion))[0]
+        self.run_name += f"_oneMotion_{selected_motion_stem}"
+
+
+@dataclass(kw_only=True)
+class G1PerceptiveShadowingOneMotionEnvCfg_PLAY(G1PerceptiveShadowingEnvCfg_PLAY):
+    """Play config for the one-motion perceptive shadowing debug task."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        selected_motion = _apply_single_motion_metadata(
+            self.scene,
+            output_tag="g1_perceptive_shadowing_one_motion_play",
+            selected_motion_file=_hacked_single_motion_file_,
+        )
+        selected_motion_stem = os.path.splitext(os.path.basename(selected_motion))[0]
+        self.run_name += f"_oneMotion_{selected_motion_stem}"
 
         # add another box to the scene (to test visual generalization)
         # self.scene.distractor = RigidObjectCfg(
