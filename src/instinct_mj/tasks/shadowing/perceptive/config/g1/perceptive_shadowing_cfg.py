@@ -120,6 +120,25 @@ def _apply_single_motion_metadata(
     return selected_relative_motion
 
 
+def _maybe_disable_single_motion_binning(motion_buffer) -> bool:
+    """Use deterministic whole-motion playback when metadata contains only one motion."""
+    metadata_yaml = os.path.expanduser(motion_buffer.metadata_yaml)
+    try:
+        with open(metadata_yaml, encoding="utf-8") as f:
+            metadata = yaml.safe_load(f) or {}
+    except OSError:
+        return False
+
+    motion_files = metadata.get("motion_files") or []
+    if len(motion_files) != 1:
+        return False
+
+    motion_buffer.motion_start_from_middle_range = [0.0, 0.0]
+    motion_buffer.motion_bin_length_s = None
+    motion_buffer.env_starting_stub_sampling_strategy = "independent"
+    return True
+
+
 @dataclass(kw_only=True)
 class TerrainMotionCfg(TerrainMotionCfgBase):
     path: object = field(default_factory=lambda: os.path.expanduser(MOTION_FOLDER))
@@ -257,6 +276,7 @@ class G1PerceptiveShadowingEnvCfg(perceptual_cfg.PerceptiveShadowingEnvCfg):
             terrain_cfg = self.scene.terrain.terrain_generator.sub_terrains["motion_matched"]
             terrain_cfg.path = motion_buffer.path
             terrain_cfg.metadata_yaml = motion_buffer.metadata_yaml
+        _maybe_disable_single_motion_binning(motion_buffer)
         active_motion_name = list(motion_reference_cfg.motion_buffers.keys())[0]
         active_motion_buffer = motion_reference_cfg.motion_buffers[active_motion_name]
 
@@ -336,6 +356,7 @@ class G1PerceptiveShadowingEnvCfg_PLAY(G1PerceptiveShadowingEnvCfg):
             terrain_cfg.metadata_yaml = motion_buffer.metadata_yaml
             self.scene.terrain.terrain_generator.num_rows = 6
             self.scene.terrain.terrain_generator.num_cols = 6
+        self.run_name = self.run_name.replace("_concatMotionBins", "_independentMotionBins")
         # self.scene.motion_reference.motion_buffers.pop(MOTION_NAME)
         # self.scene.motion_reference.motion_buffers["AMASSMotion"] = AMASSMotionCfg()
         # self.scene.motion_reference.motion_buffers["AMASSMotion"].motion_start_from_middle_range = [0.0, 0.0]
@@ -424,6 +445,13 @@ class G1PerceptiveShadowingOneMotionEnvCfg(G1PerceptiveShadowingEnvCfg):
             output_tag="g1_perceptive_shadowing_one_motion_train",
             selected_motion_file=_hacked_single_motion_file_,
         )
+        motion_reference_cfg = next(
+            sensor_cfg for sensor_cfg in self.scene.sensors if sensor_cfg.name == "motion_reference"
+        )
+        motion_name = list(motion_reference_cfg.motion_buffers.keys())[0]
+        motion_buffer = motion_reference_cfg.motion_buffers[motion_name]
+        if _maybe_disable_single_motion_binning(motion_buffer):
+            self.run_name = self.run_name.replace("_concatMotionBins", "_independentMotionBins")
         selected_motion_stem = os.path.splitext(os.path.basename(selected_motion))[0]
         self.run_name += f"_oneMotion_{selected_motion_stem}"
 
