@@ -39,59 +39,63 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [CONTRIBUTOR_AGREEMENT.md](CONTRIBUTO
 
 ## Installation
 
-- Install `mjlab` first by following the upstream setup instructions in the [mjlab repository](https://github.com/mujocolab/mjlab).
-- This repository is currently validated against `mjlab` commit `ce4ab5847f7e653178953f09b1ef945fbabd9704`.
+- Recommended Python range: `3.10` to `3.13` (`requires-python = ">=3.10,<3.14"`).
+- Stable top-level runtime matrix currently locked by `pyproject.toml` / `uv.lock`:
+  - `mjlab==1.3.0`
+  - `mujoco==3.7.0`
+  - `mujoco-warp==3.7.0.1`
+- Current non-release exceptions in the resolved environment:
+  - `instinct_rl` is still sourced from Git, currently locked to commit `3a2844890387eda6d93a4465cdef9e767aba8546`.
+  - Upstream `mujoco-warp==3.7.0.1` currently pulls `warp-lang==1.13.0.dev20260225` as a transitive dependency.
+- This means `InstinctMJ` no longer pins nightly `mjlab` / `mujoco` artifacts, but the full dependency graph is not yet “all release tags only”.
 
-- Install `instinct_rl` by following the [instinct_rl README](https://github.com/project-instinct/instinct_rl/blob/main/README.md).
-  TL; DR:
+### Stable install with `uv` (recommended)
 
-  ```bash
-  git clone https://github.com/project-instinct/instinct_rl.git
-  python -m pip install -e instinct_rl
-  ```
+Use this path if you want the environment that matches the checked-in lock file.
 
-- Clone this repository into any common workspace directory as a sibling of `mjlab` and `instinct_rl`:
+```bash
+git clone https://github.com/project-instinct/InstinctMJ.git
+cd InstinctMJ
+uv sync
+```
 
-  ```bash
-  mkdir -p <workspace_dir>
-  cd <workspace_dir>
+This installs the locked release stack from `pyproject.toml` / `uv.lock` and does not require a local `mjlab` checkout.
 
-  # Option 1: HTTPS
-  git clone https://github.com/mujocolab/mjlab.git
-  git clone https://github.com/project-instinct/instinct_rl.git
-  git clone https://github.com/project-instinct/InstinctMJ.git
-  cd mjlab
-  git checkout ce4ab5847f7e653178953f09b1ef945fbabd9704
-  cd ..
+### Editable multi-repo workspace (optional)
 
-  # Option 2: SSH
-  # git clone git@github.com:mujocolab/mjlab.git
-  # git clone git@github.com:project-instinct/instinct_rl.git
-  # git clone git@github.com:project-instinct/InstinctMJ.git
-  ```
+Use this path only if you want to develop against local sibling checkouts of `mjlab` and `instinct_rl`.
 
-- Install the package with `uv`:
+```bash
+mkdir -p <workspace_dir>
+cd <workspace_dir>
 
-  ```bash
-  cd InstinctMJ
-  uv sync
-  ```
+# Option 1: HTTPS
+git clone https://github.com/mujocolab/mjlab.git
+git clone https://github.com/project-instinct/instinct_rl.git
+git clone https://github.com/project-instinct/InstinctMJ.git
+cd mjlab
+git checkout v1.3.0
+cd ../InstinctMJ
+uv sync
+uv pip install --python .venv/bin/python --no-deps -e ../mjlab -e ../instinct_rl
 
-- If you are actively developing against sibling `mjlab` / `instinct_rl` checkouts,
-  reinstall those local repositories in editable mode after `uv sync`.
-  Otherwise, `uv` will keep using the git-pinned sources from `pyproject.toml` / `uv.lock`.
+# Option 2: SSH
+# git clone git@github.com:mujocolab/mjlab.git
+# git clone git@github.com:project-instinct/instinct_rl.git
+# git clone git@github.com:project-instinct/InstinctMJ.git
+```
 
-  ```bash
-  uv pip install --python .venv/bin/python --no-deps -e ../mjlab -e ../instinct_rl
-  ```
+If you skip the final editable reinstall, `uv` will keep using the version-pinned sources recorded in `pyproject.toml` / `uv.lock`.
 
-- Or install editable packages from the public repositories with `pip`:
+### `pip` alternative
 
-  ```bash
-  pip install -e "git+https://github.com/mujocolab/mjlab.git@ce4ab5847f7e653178953f09b1ef945fbabd9704#egg=mjlab"
-  pip install -e "git+https://github.com/project-instinct/instinct_rl.git#egg=instinct_rl"
-  pip install -e .
-  ```
+If you prefer `pip`, keep the same top-level pins explicitly:
+
+```bash
+pip install "mujoco>=3.7.0,<3.8" "mjlab==1.3.0"
+pip install -e "git+https://github.com/project-instinct/instinct_rl.git@3a2844890387eda6d93a4465cdef9e767aba8546#egg=instinct_rl"
+pip install -e .
+```
 
 - After installation, you can run the training workflow directly with `instinct_rl`-style commands:
 

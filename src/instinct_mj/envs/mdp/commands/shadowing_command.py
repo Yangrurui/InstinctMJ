@@ -732,13 +732,7 @@ class ProjectedGravityRefCommand(ShadowingCommandBase):
         """
         # initialize the base class
         super().__init__(cfg, env)
-        gravity = env.sim.model.opt.gravity
-        if gravity.ndim == 2:
-            gravity = gravity[0]
-        gravity = torch.as_tensor(gravity, device=self.device, dtype=torch.float)
-        # Convert to direction vector
-        gravity_dir = math_utils.normalize(gravity.unsqueeze(0)).squeeze(0)
-        self.GRAVITY_VEC_W = math_utils.normalize(gravity.unsqueeze(0)).expand(self.num_envs, -1)  # (num_envs, 3)
+        self.GRAVITY_VEC_W = self._env.scene[self.cfg.asset_cfg.name].data.gravity_vec_w.clone()  # (num_envs, 3)
         # generate the command tensor buffer
         self._command = torch.zeros(
             (self.num_envs, self._motion_reference.num_frames, 3),

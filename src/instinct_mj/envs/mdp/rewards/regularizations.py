@@ -50,35 +50,32 @@ def _iter_joint_actuator_targets_and_stiffness(asset: Articulation):
 
 
 def _joint_applied_and_computed_torque(asset: Articulation) -> tuple[torch.Tensor, torch.Tensor]:
-    """Build joint-wise applied/computed torque tensors from actuator-space buffers.
+    """Build joint-wise applied/computed torque tensors.
 
     Matches the InstinctLab semantics where:
-    - applied torque: actually applied actuator effort in simulation
+    - applied torque: actually applied actuator effort in joint space via qfrc_actuator
     - computed torque: raw controller effort before clipping for non-effort controllers
       (for position/velocity-style controllers, ctrl is not torque and we use applied values).
     """
-    joint_applied_torque = torch.zeros_like(asset.data.joint_pos)
-    joint_computed_torque = torch.zeros_like(asset.data.joint_pos)
+    joint_applied_torque = asset.data.qfrc_actuator.clone()
+    joint_computed_torque = torch.zeros_like(joint_applied_torque)
 
     if len(asset.actuators) == 0:
         return joint_applied_torque, joint_computed_torque
 
     local_ctrl = asset.data.data.ctrl[:, asset.indexing.ctrl_ids]
-    local_actuator_force = asset.data.actuator_force
 
     for actuator in asset.actuators:
         if actuator.transmission_type != TransmissionType.JOINT:
             continue
 
-        applied_values = local_actuator_force[:, actuator.ctrl_ids]
         ctrl_type_actuator = _unwrap_base_actuator(actuator)
 
         if getattr(ctrl_type_actuator, "command_field", None) in _NON_EFFORT_CTRL_COMMAND_FIELDS:
-            computed_values = applied_values
+            computed_values = joint_applied_torque[:, actuator.target_ids]
         else:
             computed_values = local_ctrl[:, actuator.ctrl_ids]
 
-        joint_applied_torque[:, actuator.target_ids] += applied_values
         joint_computed_torque[:, actuator.target_ids] += computed_values
 
     return joint_applied_torque, joint_computed_torque
@@ -119,7 +116,7 @@ def motors_power_square(
     normalize_by_num_joints: bool = False,
 ):
     asset: Articulation = env.scene[asset_cfg.name]
-    # mjlab exposes actuator-space values; rebuild InstinctLab-style applied torque in joint space.
+    # qfrc_actuator provides the applied actuator force directly in joint space.
     joint_applied_torque, _ = _joint_applied_and_computed_torque(asset)
     power_j = joint_applied_torque * asset.data.joint_vel  # (batch_size, num_joints)
     if normalize_by_stiffness:

@@ -35,32 +35,29 @@ _NON_EFFORT_CTRL_COMMAND_FIELDS = {"position", "velocity"}
 
 
 def _joint_torque_monitor_values(asset: Entity) -> tuple[torch.Tensor, torch.Tensor]:
-    """Build joint-wise applied/computed torque buffers from actuator-space data."""
-    joint_applied_torque = torch.zeros_like(asset.data.joint_pos)
-    joint_computed_torque = torch.zeros_like(asset.data.joint_pos)
+    """Build joint-wise applied/computed torque buffers."""
+    joint_applied_torque = asset.data.qfrc_actuator.clone()
+    joint_computed_torque = torch.zeros_like(joint_applied_torque)
 
     if len(asset.actuators) == 0:
         return joint_applied_torque, joint_computed_torque
 
     local_ctrl = asset.data.data.ctrl[:, asset.indexing.ctrl_ids]
-    local_actuator_force = asset.data.actuator_force
 
     for actuator in asset.actuators:
         if actuator.transmission_type != TransmissionType.JOINT:
             continue
 
-        applied_values = local_actuator_force[:, actuator.ctrl_ids]
         ctrl_type_actuator = actuator
         while hasattr(ctrl_type_actuator, "base_actuator"):
             ctrl_type_actuator = ctrl_type_actuator.base_actuator
 
         if getattr(ctrl_type_actuator, "command_field", None) in _NON_EFFORT_CTRL_COMMAND_FIELDS:
             # Position/velocity actuator ctrl is not torque; use simulated force.
-            computed_values = applied_values
+            computed_values = joint_applied_torque[:, actuator.target_ids]
         else:
             computed_values = local_ctrl[:, actuator.ctrl_ids]
 
-        joint_applied_torque[:, actuator.target_ids] += applied_values
         joint_computed_torque[:, actuator.target_ids] += computed_values
 
     return joint_applied_torque, joint_computed_torque
@@ -116,11 +113,11 @@ class TorqueMonitorSensor(MonitorSensor):
         # set access to the articulation we want to monitor
         self._asset = self._env.scene[self.cfg.entity_name]
         # set the buffer
-        # mjlab uses actuator_force instead of applied_torque
+        # qfrc_actuator matches InstinctLab's joint-space dof actuation forces.
         self._torque_buffer = torch.zeros(
             self._env.num_envs,
             self.cfg.history_length,
-            self._asset.data.actuator_force.shape[-1],
+            self._asset.data.qfrc_actuator.shape[-1],
             dtype=torch.float32,
             device=self.device,
         )
@@ -129,8 +126,7 @@ class TorqueMonitorSensor(MonitorSensor):
 
     def _update_buffers_impl(self):
         all_env_ids = torch.arange(self._env.num_envs, dtype=torch.long, device=self.device)
-        # mjlab uses actuator_force instead of applied_torque
-        self._torque_buffer[all_env_ids, self._step_idx, :] = self._asset.data.actuator_force
+        self._torque_buffer[all_env_ids, self._step_idx, :] = self._asset.data.qfrc_actuator
 
 
 class JointStatMonitorTerm(MonitorTerm):

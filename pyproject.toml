@@ -25,7 +25,8 @@ dependencies = [
   "onnxruntime",
   "pandas",
   "coacd",
-  "mjlab",
+  "mujoco>=3.7.0,<3.8",
+  "mjlab==1.3.0",
   "instinct_rl",
 ]
 
@@ -52,18 +53,12 @@ required-environments = [
 ]
 
 [[tool.uv.index]]
+name = "pypi"
 url = "https://pypi.org/simple"
 
-[[tool.uv.index]]
-name = "mujoco"
-url = "https://py.mujoco.org"
-explicit = true
-
 [tool.uv.sources]
-mjlab = { git = "https://github.com/mujocolab/mjlab.git", rev = "ce4ab5847f7e653178953f09b1ef945fbabd9704" }
 instinct_rl = { git = "https://github.com/project-instinct/instinct_rl.git" }
-mujoco = { index = "mujoco" }
-mujoco-warp = { git = "https://github.com/google-deepmind/mujoco_warp", rev = "875c4caf06d71b12b2036c327e7a07ce08a78b9a" }
+mujoco = { index = "pypi" }
 
 [tool.setuptools]
 package-dir = {"" = "src"}
