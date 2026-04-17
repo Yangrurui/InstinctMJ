@@ -38,9 +38,7 @@ class InstinctRlEnv(ManagerBasedRlEnv):
         self.obs_buf = {}
         # Initialize the manual-reset state here because InstinctRlEnv
         # customizes scene construction instead of calling ManagerBasedRlEnv.__init__.
-        self._manual_reset_pending = torch.zeros(
-            self.cfg.scene.num_envs, dtype=torch.bool, device=device
-        )
+        self._manual_reset_pending = torch.zeros(self.cfg.scene.num_envs, dtype=torch.bool, device=device)
 
         # Use InstinctScene so terrain cfg.class_type is honored (e.g. hacked_generator importer).
         self.scene = InstinctScene(self.cfg.scene, device=device)
